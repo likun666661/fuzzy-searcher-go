@@ -358,3 +358,63 @@ func TestRetrieveWithPath2Detrace(t *testing.T) {
 		t.Fatalf("debug strategies = %#v", result.Debug.Strategies)
 	}
 }
+
+func TestRetrieveWithPrimitiveMerge(t *testing.T) {
+	graph := &dataset.Graph{
+		Nodes: map[string]*dataset.Node{
+			"n1": {
+				ID: "n1",
+				Properties: map[string]any{
+					"name":     "Fallback",
+					"chunk id": "c1",
+				},
+			},
+		},
+	}
+	chunkStore := &chunks.Store{ByID: map[string]string{
+		"c1": "fallback chunk",
+	}}
+	path1 := &retrieval.Path1Triples{
+		SchemaVersion:         "path1-triples/v1",
+		Dataset:               "demo",
+		RawOneHopTriplesCount: 4,
+		RerankedTriples: []retrieval.TraceTriple{
+			{
+				Relation:        "path1_relation",
+				Score:           0.7,
+				FormattedTriple: "(path1, relation, output) [score: 0.700]",
+				ChunkIDs:        []string{"c1"},
+			},
+		},
+	}
+	path2 := &retrieval.Path2Triples{
+		SchemaVersion: "path2-triples/v1",
+		Dataset:       "demo",
+		RescoredTriples: []retrieval.TraceTriple{
+			{
+				Relation:        "path2_relation",
+				Score:           0.9,
+				FormattedTriple: "(path2, relation, output) [score: 0.900]",
+				ChunkIDs:        []string{"c1"},
+			},
+		},
+	}
+
+	result, err := retrieval.NewService(graph, chunkStore).Retrieve(context.Background(), retrieval.RetrieveRequest{
+		Question:     "question",
+		TopK:         20,
+		Path1Triples: path1,
+		Path2Triples: path2,
+	})
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	if got := result.Triples; len(got) != 2 ||
+		got[0] != "(path2, relation, output) [score: 0.900]" ||
+		got[1] != "(path1, relation, output) [score: 0.700]" {
+		t.Fatalf("triples = %#v", got)
+	}
+	if len(result.Debug.Strategies) != 1 || result.Debug.Strategies[0].Name != "path1_path2_primitive_merge" {
+		t.Fatalf("debug strategies = %#v", result.Debug.Strategies)
+	}
+}

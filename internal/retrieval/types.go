@@ -14,6 +14,7 @@ type RetrieveRequest struct {
 	InvolvedTypes InvolvedTypes `json:"involved_types,omitempty"`
 	Dataset       string        `json:"dataset,omitempty"`
 	TripleTrace   *TripleTrace  `json:"-"`
+	Path1Triples  *Path1Triples `json:"-"`
 	Path2Triples  *Path2Triples `json:"-"`
 }
 
@@ -76,6 +77,17 @@ type Path2Triples struct {
 	RescoredTriples []TraceTriple `json:"rescored_triples"`
 	ExpandedTriples []TraceTriple `json:"expanded_candidates,omitempty"`
 	TripleIndexHits []TraceTriple `json:"triple_index_hits,omitempty"`
+}
+
+// Path1Triples is the Python-authoritative path1 primitive emitted by Phase 7A.
+type Path1Triples struct {
+	SchemaVersion         string        `json:"schema_version"`
+	Dataset               string        `json:"dataset"`
+	Question              string        `json:"question"`
+	TopK                  int           `json:"top_k"`
+	RawOneHopTriplesCount int           `json:"raw_one_hop_triples_count,omitempty"`
+	RawOneHopTriples      []TraceTriple `json:"raw_one_hop_triples,omitempty"`
+	RerankedTriples       []TraceTriple `json:"reranked_triples"`
 }
 
 // TraceTriple is one Python-authoritative triple trace item.

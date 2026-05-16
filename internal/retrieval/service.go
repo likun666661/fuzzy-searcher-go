@@ -50,6 +50,15 @@ func (s *Service) Retrieve(ctx context.Context, req RetrieveRequest) (*RetrieveR
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if req.Path1Triples != nil && req.Path2Triples != nil {
+		result, err := s.retrieveFromPrimitiveMerge(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if result != nil {
+			return result, nil
+		}
+	}
 	if req.TripleTrace != nil && req.Path2Triples != nil {
 		if result := s.retrieveFromPath2Detrace(req); result != nil {
 			return result, nil
@@ -190,6 +199,50 @@ func (s *Service) retrieveFromPath2Detrace(req RetrieveRequest) *RetrieveResult 
 	}
 }
 
+func (s *Service) retrieveFromPrimitiveMerge(ctx context.Context, req RetrieveRequest) (*RetrieveResult, error) {
+	if req.Path1Triples == nil || req.Path2Triples == nil {
+		return nil, nil
+	}
+	scored := mergeTraceTriples(req.Path2Triples.RescoredTriples, req.Path1Triples.RerankedTriples, req.TopK)
+	triples, tripleChunkIDs := formatScoredTraceTriples(scored)
+
+	topK := req.TopK
+	if topK <= 0 {
+		topK = len(scored)
+	}
+	chunkRetrievalResults, sidecarChunkIDs, sidecarErr := s.retrieveChunksViaSidecar(ctx, req, topK)
+	chunkIDs := mergeStrings(sidecarChunkIDs, tripleChunkIDs)
+	chunkContents := make([]string, 0, len(chunkIDs))
+	for _, id := range chunkIDs {
+		if content, ok := s.chunks.Get(id); ok {
+			chunkContents = append(chunkContents, content)
+		}
+	}
+	meta := map[string]any{
+		"path1_schema_version": req.Path1Triples.SchemaVersion,
+		"path2_schema_version": req.Path2Triples.SchemaVersion,
+		"path1_count":          len(req.Path1Triples.RerankedTriples),
+		"path2_count":          len(req.Path2Triples.RescoredTriples),
+		"path1_raw_count":      req.Path1Triples.RawOneHopTriplesCount,
+	}
+	for k, v := range sidecarMeta(s.sidecar != nil, req, sidecarErr) {
+		meta["chunk_"+k] = v
+	}
+	return &RetrieveResult{
+		Triples:               triples,
+		ChunkIDs:              chunkIDs,
+		ChunkContents:         chunkContents,
+		ChunkRetrievalResults: chunkRetrievalResults,
+		Debug: RetrieveDebug{Strategies: []StrategyDebug{
+			{
+				Name:  "path1_path2_primitive_merge",
+				Count: len(triples),
+				Meta:  meta,
+			},
+		}},
+	}, nil
+}
+
 func (s *Service) retrieveFromTripleTrace(req RetrieveRequest) *RetrieveResult {
 	record := selectTripleTraceRecord(req.TripleTrace, req.Question)
 	if record == nil {
@@ -238,6 +291,43 @@ func selectTripleTraceRecord(trace *TripleTrace, question string) *TripleTraceRe
 		return &trace.Records[0]
 	}
 	return nil
+}
+
+func mergeTraceTriples(path2 []TraceTriple, path1 []TraceTriple, topK int) []TraceTriple {
+	scored := make([]TraceTriple, 0, len(path2)+len(path1))
+	scored = append(scored, path2...)
+	scored = append(scored, path1...)
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].Score > scored[j].Score
+	})
+	if topK <= 0 || len(scored) <= topK {
+		return scored
+	}
+	return scored[:topK]
+}
+
+func formatScoredTraceTriples(scored []TraceTriple) ([]string, []string) {
+	triples := make([]string, 0, len(scored))
+	chunkSet := map[string]struct{}{}
+	for _, item := range scored {
+		if shouldSkipTripleRelation(item.Relation) {
+			continue
+		}
+		formatted := item.FormattedTriple
+		if formatted == "" && item.FormattedWithoutScore != "" {
+			formatted = ensureTripleScore(item.FormattedWithoutScore, item.Score)
+		}
+		if formatted == "" {
+			continue
+		}
+		triples = append(triples, formatted)
+		for _, chunkID := range item.ChunkIDs {
+			if chunkID != "" {
+				chunkSet[chunkID] = struct{}{}
+			}
+		}
+	}
+	return triples, sortedKeys(chunkSet)
 }
 
 func (s *Service) retrieveChunksViaSidecar(ctx context.Context, req RetrieveRequest, topK int) ([]string, []string, error) {

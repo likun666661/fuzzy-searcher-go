@@ -92,6 +92,22 @@ go run ./cmd/youtu-retriever retrieve \
   --sidecar-triple-trace
 ```
 
+For Phase 7 primitive-merge parity, Go can fetch path1 and path2 authority
+primitives separately, then merge/sort/top-k locally without using the full
+triple trace:
+
+```bash
+go run ./cmd/youtu-retriever retrieve \
+  --graph ../youtu-graphrag/output/graphs/demo_new.json \
+  --chunks ../youtu-graphrag/output/chunks/demo.txt \
+  --dataset demo \
+  --question "When was the person who Messi's goals in Copa del Rey compared to get signed by Barcelona?" \
+  --top-k 20 \
+  --sidecar-url http://127.0.0.1:8765 \
+  --sidecar-path1-triples \
+  --sidecar-path2-triples
+```
+
 It outputs a bare `RetrieveResult` JSON object:
 
 ```json
@@ -133,5 +149,7 @@ python3 scripts/retrieval_regression_report.py \
   --record-id qa_1
 ```
 
-Current Phase 4 expected status with `--triple-trace`: `loader`, `chunk`,
-`triple`, and `full` all pass against `demo.json`.
+Current Phase 7 expected status with `--sidecar-path1-triples
+--sidecar-path2-triples`: `loader`, `chunk`, `triple`, and `full` all pass
+against `demo.json`; the debug strategy should be
+`path1_path2_primitive_merge`.

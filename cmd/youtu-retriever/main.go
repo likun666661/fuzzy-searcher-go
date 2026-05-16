@@ -28,6 +28,7 @@ func main() {
 	sidecarURL := flag.String("sidecar-url", "", "Optional Python sidecar base URL")
 	tripleTracePath := flag.String("triple-trace", "", "Optional Python triple-trace/v1 JSON path")
 	sidecarTripleTrace := flag.Bool("sidecar-triple-trace", false, "Fetch Python triple-trace/v1 from --sidecar-url")
+	sidecarPath1Triples := flag.Bool("sidecar-path1-triples", false, "Fetch Python path1-triples/v1 from --sidecar-url and merge locally")
 	sidecarPath2Triples := flag.Bool("sidecar-path2-triples", false, "Fetch Python path2-triples/v1 from --sidecar-url and merge locally")
 	path2Threshold := flag.Float64("path2-threshold", 0.1, "Threshold for --sidecar-path2-triples")
 	pretty := flag.Bool("pretty", true, "Pretty-print JSON output")
@@ -81,10 +82,19 @@ func main() {
 		if client == nil {
 			fatal(fmt.Errorf("--sidecar-path2-triples requires --sidecar-url"))
 		}
-		if req.TripleTrace == nil {
-			fatal(fmt.Errorf("--sidecar-path2-triples requires --sidecar-triple-trace or --triple-trace for path1 authority"))
+		if req.TripleTrace == nil && !*sidecarPath1Triples {
+			fatal(fmt.Errorf("--sidecar-path2-triples requires --sidecar-path1-triples, --sidecar-triple-trace, or --triple-trace for path1 authority"))
 		}
 		req.Path2Triples, err = fetchPath2Triples(context.Background(), client, req, *path2Threshold)
+		if err != nil {
+			fatal(err)
+		}
+	}
+	if *sidecarPath1Triples {
+		if client == nil {
+			fatal(fmt.Errorf("--sidecar-path1-triples requires --sidecar-url"))
+		}
+		req.Path1Triples, err = fetchPath1Triples(context.Background(), client, req)
 		if err != nil {
 			fatal(err)
 		}
@@ -110,6 +120,28 @@ func main() {
 		fatal(err)
 	}
 	fmt.Println(string(out))
+}
+
+func fetchPath1Triples(ctx context.Context, client *sidecar.Client, req retrieval.RetrieveRequest) (*retrieval.Path1Triples, error) {
+	var path1 retrieval.Path1Triples
+	err := client.Path1Triples(ctx, sidecar.Path1TriplesRequest{
+		Dataset:    req.Dataset,
+		Question:   req.Question,
+		TopK:       req.TopK,
+		IncludeRaw: false,
+		InvolvedTypes: sidecar.InvolvedTypes{
+			Nodes:      req.InvolvedTypes.Nodes,
+			Relations:  req.InvolvedTypes.Relations,
+			Attributes: req.InvolvedTypes.Attributes,
+		},
+	}, &path1)
+	if err != nil {
+		return nil, fmt.Errorf("fetch path1 triples: %w", err)
+	}
+	if path1.SchemaVersion != "path1-triples/v1" {
+		return nil, fmt.Errorf("unsupported path1 triples schema: %q", path1.SchemaVersion)
+	}
+	return &path1, nil
 }
 
 func fetchPath2Triples(ctx context.Context, client *sidecar.Client, req retrieval.RetrieveRequest, threshold float64) (*retrieval.Path2Triples, error) {
