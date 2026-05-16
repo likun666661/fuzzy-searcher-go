@@ -76,7 +76,25 @@ Compare Go CLI output against a Python `retriever-golden/v1` fixture:
 python3 scripts/compare_retrieval_golden.py \
   --golden ../youtu-graphrag/output/retrieval_golden/demo.json \
   --actual /tmp/go_retrieval_actual.json \
+  --record-id qa_1 \
+  --mode chunk
+```
+
+Available modes:
+
+- `loader`: chunk id/content coverage, ignoring order
+- `chunk`: ordered chunks plus `chunk_retrieval_results`
+- `triple`: triples only
+- `full`: complete normalized result
+
+Generate a Phase 3 regression report:
+
+```bash
+python3 scripts/retrieval_regression_report.py \
+  --golden ../youtu-graphrag/output/retrieval_golden/demo.json \
+  --actual /tmp/go_retrieval_actual.json \
   --record-id qa_1
 ```
 
-Phase 1 expected status: loader and chunk id extraction can align, while `chunk_retrieval_results` and triple content/order are expected to differ until the Python embedding/FAISS sidecar is wired into the Go core.
+Phase 2B expected status: `loader` and `chunk` pass, while `triple` and `full`
+remain red until triple/vector reranking is wired into the Go core.

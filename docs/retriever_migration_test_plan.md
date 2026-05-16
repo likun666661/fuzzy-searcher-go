@@ -157,6 +157,29 @@ For Phase 2B, `loader` should remain green and `chunk` should become green
 after the Go retriever consumes sidecar chunk FAISS results. `triple` and
 `full` are expected to remain red until vector/triple rerank work lands.
 
+## Phase 3 Report
+
+Use the regression report wrapper when evaluating triple/vector rerank work:
+
+```bash
+python3 scripts/retrieval_regression_report.py \
+  --golden ../youtu-graphrag/output/retrieval_golden/demo.json \
+  --actual /tmp/go_retrieval_actual.json \
+  --record-id qa_1
+```
+
+The report includes:
+
+- gate status for `loader`, `chunk`, `triple`, and `full`
+- chunk id/order and `chunk_retrieval_results` counts
+- triple exact-overlap and top-N overlap metrics
+- examples of missing golden triples and extra actual triples
+
+For Phase 3, `loader` and `chunk` should stay green while `triple` mismatch
+count and top-N overlap improve. Use `--fail-on loader --fail-on chunk` to make
+the report fail only on regressions in already-green gates; add
+`--fail-on triple` once triple/vector rerank is expected to pass.
+
 ## CI Gate
 
 The first CI gate should be permissive:
