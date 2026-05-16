@@ -28,6 +28,8 @@ func main() {
 	sidecarURL := flag.String("sidecar-url", "", "Optional Python sidecar base URL")
 	tripleTracePath := flag.String("triple-trace", "", "Optional Python triple-trace/v1 JSON path")
 	sidecarTripleTrace := flag.Bool("sidecar-triple-trace", false, "Fetch Python triple-trace/v1 from --sidecar-url")
+	sidecarPath2Triples := flag.Bool("sidecar-path2-triples", false, "Fetch Python path2-triples/v1 from --sidecar-url and merge locally")
+	path2Threshold := flag.Float64("path2-threshold", 0.1, "Threshold for --sidecar-path2-triples")
 	pretty := flag.Bool("pretty", true, "Pretty-print JSON output")
 	flag.CommandLine.Parse(args)
 
@@ -75,6 +77,18 @@ func main() {
 			fatal(err)
 		}
 	}
+	if *sidecarPath2Triples {
+		if client == nil {
+			fatal(fmt.Errorf("--sidecar-path2-triples requires --sidecar-url"))
+		}
+		if req.TripleTrace == nil {
+			fatal(fmt.Errorf("--sidecar-path2-triples requires --sidecar-triple-trace or --triple-trace for path1 authority"))
+		}
+		req.Path2Triples, err = fetchPath2Triples(context.Background(), client, req, *path2Threshold)
+		if err != nil {
+			fatal(err)
+		}
+	}
 
 	opts := []retrieval.Option{}
 	if client != nil {
@@ -96,6 +110,25 @@ func main() {
 		fatal(err)
 	}
 	fmt.Println(string(out))
+}
+
+func fetchPath2Triples(ctx context.Context, client *sidecar.Client, req retrieval.RetrieveRequest, threshold float64) (*retrieval.Path2Triples, error) {
+	var path2 retrieval.Path2Triples
+	err := client.Path2Triples(ctx, sidecar.Path2TriplesRequest{
+		Dataset:           req.Dataset,
+		Question:          req.Question,
+		TopK:              req.TopK,
+		Threshold:         threshold,
+		IncludeCandidates: false,
+		IncludeIndexHits:  false,
+	}, &path2)
+	if err != nil {
+		return nil, fmt.Errorf("fetch path2 triples: %w", err)
+	}
+	if path2.SchemaVersion != "path2-triples/v1" {
+		return nil, fmt.Errorf("unsupported path2 triples schema: %q", path2.SchemaVersion)
+	}
+	return &path2, nil
 }
 
 func fetchTripleTrace(ctx context.Context, client *sidecar.Client, req retrieval.RetrieveRequest) (*retrieval.TripleTrace, error) {

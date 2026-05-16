@@ -56,6 +56,16 @@ type TripleTraceRequest struct {
 	InvolvedTypes InvolvedTypes `json:"involved_types,omitempty"`
 }
 
+// Path2TriplesRequest is POST /v1/retrieval/path2-triples input.
+type Path2TriplesRequest struct {
+	Dataset           string  `json:"dataset"`
+	Question          string  `json:"question"`
+	TopK              int     `json:"top_k"`
+	Threshold         float64 `json:"threshold,omitempty"`
+	IncludeCandidates bool    `json:"include_candidates,omitempty"`
+	IncludeIndexHits  bool    `json:"include_index_hits,omitempty"`
+}
+
 // InvolvedTypes mirrors the retriever request shape without importing retrieval.
 type InvolvedTypes struct {
 	Nodes      []string `json:"nodes,omitempty"`
@@ -120,6 +130,11 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) (*SearchResponse
 // TripleTrace requests Python-authoritative triple trace output.
 func (c *Client) TripleTrace(ctx context.Context, req TripleTraceRequest, out any) error {
 	return c.post(ctx, "/v1/retrieval/triple-trace", req, out)
+}
+
+// Path2Triples requests Python-authoritative path2 expansion/rescore output.
+func (c *Client) Path2Triples(ctx context.Context, req Path2TriplesRequest, out any) error {
+	return c.post(ctx, "/v1/retrieval/path2-triples", req, out)
 }
 
 func (c *Client) post(ctx context.Context, path string, in any, out any) error {

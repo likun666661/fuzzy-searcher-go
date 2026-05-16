@@ -50,6 +50,11 @@ func (s *Service) Retrieve(ctx context.Context, req RetrieveRequest) (*RetrieveR
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if req.TripleTrace != nil && req.Path2Triples != nil {
+		if result := s.retrieveFromPath2Detrace(req); result != nil {
+			return result, nil
+		}
+	}
 	if req.TripleTrace != nil {
 		if result := s.retrieveFromTripleTrace(req); result != nil {
 			return result, nil
@@ -104,6 +109,85 @@ func (s *Service) Retrieve(ctx context.Context, req RetrieveRequest) (*RetrieveR
 			{Name: "chunk_lookup", Count: len(chunkContents)},
 		}},
 	}, nil
+}
+
+func (s *Service) retrieveFromPath2Detrace(req RetrieveRequest) *RetrieveResult {
+	record := selectTripleTraceRecord(req.TripleTrace, req.Question)
+	if record == nil || req.Path2Triples == nil {
+		return nil
+	}
+
+	scored := make([]TraceTriple, 0, len(req.Path2Triples.RescoredTriples)+len(record.Path1.RerankedTriples))
+	scored = append(scored, req.Path2Triples.RescoredTriples...)
+	scored = append(scored, record.Path1.RerankedTriples...)
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].Score > scored[j].Score
+	})
+	topK := req.TopK
+	if topK <= 0 {
+		topK = len(scored)
+	}
+	if len(scored) > topK {
+		scored = scored[:topK]
+	}
+
+	triples := make([]string, 0, len(scored))
+	chunkSet := map[string]struct{}{}
+	for _, item := range scored {
+		if shouldSkipTripleRelation(item.Relation) {
+			continue
+		}
+		formatted := item.FormattedTriple
+		if formatted == "" && item.FormattedWithoutScore != "" {
+			formatted = ensureTripleScore(item.FormattedWithoutScore, item.Score)
+		}
+		if formatted == "" {
+			continue
+		}
+		triples = append(triples, formatted)
+		for _, chunkID := range item.ChunkIDs {
+			if chunkID != "" {
+				chunkSet[chunkID] = struct{}{}
+			}
+		}
+	}
+
+	chunkRetrievalResults := append([]string(nil), record.Retrieval.ChunkRetrievalResults...)
+	for _, chunkID := range record.Retrieval.ChunkIDs {
+		if chunkID != "" {
+			chunkSet[chunkID] = struct{}{}
+		}
+	}
+	chunkIDs := sortedKeys(chunkSet)
+	chunkContents := make([]string, 0, len(chunkIDs))
+	for _, id := range chunkIDs {
+		if content, ok := record.Retrieval.ChunkContentsByID[id]; ok {
+			chunkContents = append(chunkContents, content)
+			continue
+		}
+		if content, ok := s.chunks.Get(id); ok {
+			chunkContents = append(chunkContents, content)
+		}
+	}
+
+	return &RetrieveResult{
+		Triples:               triples,
+		ChunkIDs:              chunkIDs,
+		ChunkContents:         chunkContents,
+		ChunkRetrievalResults: chunkRetrievalResults,
+		Debug: RetrieveDebug{Strategies: []StrategyDebug{
+			{
+				Name:  "path2_detrace_merge",
+				Count: len(triples),
+				Meta: map[string]any{
+					"path2_schema_version": req.Path2Triples.SchemaVersion,
+					"path2_count":          len(req.Path2Triples.RescoredTriples),
+					"path1_count":          len(record.Path1.RerankedTriples),
+					"record_id":            record.ID,
+				},
+			},
+		}},
+	}
 }
 
 func (s *Service) retrieveFromTripleTrace(req RetrieveRequest) *RetrieveResult {

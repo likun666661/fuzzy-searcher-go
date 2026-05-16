@@ -14,6 +14,7 @@ type RetrieveRequest struct {
 	InvolvedTypes InvolvedTypes `json:"involved_types,omitempty"`
 	Dataset       string        `json:"dataset,omitempty"`
 	TripleTrace   *TripleTrace  `json:"-"`
+	Path2Triples  *Path2Triples `json:"-"`
 }
 
 // RetrieveResult is the JSON contract consumed by harnesses and backend glue.
@@ -48,7 +49,13 @@ type TripleTrace struct {
 type TripleTraceRecord struct {
 	ID        string            `json:"id"`
 	Question  string            `json:"question"`
+	Path1     TripleTracePath1  `json:"path1"`
 	Retrieval TripleTraceResult `json:"retrieval"`
+}
+
+// TripleTracePath1 contains Python-authoritative path1 traces.
+type TripleTracePath1 struct {
+	RerankedTriples []TraceTriple `json:"reranked_triples"`
 }
 
 // TripleTraceResult mirrors the public retrieval fields Go can consume.
@@ -57,4 +64,30 @@ type TripleTraceResult struct {
 	ChunkIDs              []string          `json:"chunk_ids"`
 	ChunkContentsByID     map[string]string `json:"chunk_contents_by_id"`
 	ChunkRetrievalResults []string          `json:"chunk_retrieval_results"`
+}
+
+// Path2Triples is the Python-authoritative path2 primitive emitted by Phase 6A.
+type Path2Triples struct {
+	SchemaVersion   string        `json:"schema_version"`
+	Dataset         string        `json:"dataset"`
+	Question        string        `json:"question"`
+	TopK            int           `json:"top_k"`
+	Threshold       float64       `json:"threshold"`
+	RescoredTriples []TraceTriple `json:"rescored_triples"`
+	ExpandedTriples []TraceTriple `json:"expanded_candidates,omitempty"`
+	TripleIndexHits []TraceTriple `json:"triple_index_hits,omitempty"`
+}
+
+// TraceTriple is one Python-authoritative triple trace item.
+type TraceTriple struct {
+	Rank                  int      `json:"rank"`
+	Source                string   `json:"source"`
+	Key                   string   `json:"key"`
+	HeadID                string   `json:"head_id"`
+	Relation              string   `json:"relation"`
+	TailID                string   `json:"tail_id"`
+	Score                 float64  `json:"score"`
+	FormattedTriple       string   `json:"formatted_triple"`
+	FormattedWithoutScore string   `json:"formatted_without_score"`
+	ChunkIDs              []string `json:"chunk_ids"`
 }
