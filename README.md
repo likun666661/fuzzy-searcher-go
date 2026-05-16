@@ -78,6 +78,20 @@ go run ./cmd/youtu-retriever retrieve \
   --triple-trace ../youtu-graphrag/output/retrieval_traces/demo_triple_trace.json
 ```
 
+If the Python sidecar exposes `/v1/retrieval/triple-trace`, Go can fetch that
+authority trace at runtime instead of reading a pre-generated file:
+
+```bash
+go run ./cmd/youtu-retriever retrieve \
+  --graph ../youtu-graphrag/output/graphs/demo_new.json \
+  --chunks ../youtu-graphrag/output/chunks/demo.txt \
+  --dataset demo \
+  --question "When was the person who Messi's goals in Copa del Rey compared to get signed by Barcelona?" \
+  --top-k 20 \
+  --sidecar-url http://127.0.0.1:8765 \
+  --sidecar-triple-trace
+```
+
 It outputs a bare `RetrieveResult` JSON object:
 
 ```json
