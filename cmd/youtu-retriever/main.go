@@ -27,6 +27,7 @@ func main() {
 	involvedTypesPath := flag.String("involved-types", "", "Optional involved_types JSON file")
 	sidecarURL := flag.String("sidecar-url", "", "Optional Python sidecar base URL")
 	tripleTracePath := flag.String("triple-trace", "", "Optional Python triple-trace/v1 JSON path")
+	sidecarTripleTrace := flag.Bool("sidecar-triple-trace", false, "Fetch Python triple-trace/v1 from --sidecar-url")
 	pretty := flag.Bool("pretty", true, "Pretty-print JSON output")
 	flag.CommandLine.Parse(args)
 
@@ -55,16 +56,29 @@ func main() {
 			fatal(err)
 		}
 	}
+	client := (*sidecar.Client)(nil)
+	if *sidecarURL != "" {
+		client = sidecar.NewClient(*sidecarURL)
+	}
 	if *tripleTracePath != "" {
 		req.TripleTrace, err = loadTripleTrace(*tripleTracePath)
 		if err != nil {
 			fatal(err)
 		}
 	}
+	if *sidecarTripleTrace {
+		if client == nil {
+			fatal(fmt.Errorf("--sidecar-triple-trace requires --sidecar-url"))
+		}
+		req.TripleTrace, err = fetchTripleTrace(context.Background(), client, req)
+		if err != nil {
+			fatal(err)
+		}
+	}
 
 	opts := []retrieval.Option{}
-	if *sidecarURL != "" {
-		opts = append(opts, retrieval.WithSidecar(sidecar.NewClient(*sidecarURL)))
+	if client != nil {
+		opts = append(opts, retrieval.WithSidecar(client))
 	}
 
 	result, err := retrieval.NewService(graph, chunkStore, opts...).Retrieve(context.Background(), req)
@@ -82,6 +96,27 @@ func main() {
 		fatal(err)
 	}
 	fmt.Println(string(out))
+}
+
+func fetchTripleTrace(ctx context.Context, client *sidecar.Client, req retrieval.RetrieveRequest) (*retrieval.TripleTrace, error) {
+	var trace retrieval.TripleTrace
+	err := client.TripleTrace(ctx, sidecar.TripleTraceRequest{
+		Dataset:  req.Dataset,
+		Question: req.Question,
+		TopK:     req.TopK,
+		InvolvedTypes: sidecar.InvolvedTypes{
+			Nodes:      req.InvolvedTypes.Nodes,
+			Relations:  req.InvolvedTypes.Relations,
+			Attributes: req.InvolvedTypes.Attributes,
+		},
+	}, &trace)
+	if err != nil {
+		return nil, fmt.Errorf("fetch triple trace: %w", err)
+	}
+	if trace.SchemaVersion != "triple-trace/v1" {
+		return nil, fmt.Errorf("unsupported triple trace schema: %q", trace.SchemaVersion)
+	}
+	return &trace, nil
 }
 
 func loadTripleTrace(path string) (*retrieval.TripleTrace, error) {

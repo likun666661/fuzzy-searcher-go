@@ -48,6 +48,21 @@ type SearchRequest struct {
 	TopK        int       `json:"top_k"`
 }
 
+// TripleTraceRequest is POST /v1/retrieval/triple-trace input.
+type TripleTraceRequest struct {
+	Dataset       string        `json:"dataset"`
+	Question      string        `json:"question"`
+	TopK          int           `json:"top_k"`
+	InvolvedTypes InvolvedTypes `json:"involved_types,omitempty"`
+}
+
+// InvolvedTypes mirrors the retriever request shape without importing retrieval.
+type InvolvedTypes struct {
+	Nodes      []string `json:"nodes,omitempty"`
+	Relations  []string `json:"relations,omitempty"`
+	Attributes []string `json:"attributes,omitempty"`
+}
+
 // SearchResponse is POST /v1/faiss/search output.
 type SearchResponse struct {
 	Dataset string      `json:"dataset"`
@@ -100,6 +115,11 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) (*SearchResponse
 		return nil, err
 	}
 	return &resp, nil
+}
+
+// TripleTrace requests Python-authoritative triple trace output.
+func (c *Client) TripleTrace(ctx context.Context, req TripleTraceRequest, out any) error {
+	return c.post(ctx, "/v1/retrieval/triple-trace", req, out)
 }
 
 func (c *Client) post(ctx context.Context, path string, in any, out any) error {
