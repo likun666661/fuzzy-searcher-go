@@ -1,0 +1,462 @@
+[
+  {
+    "query": "Who is Lionel Messi?",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "keyword_80",
+        "score": 0.725682
+      },
+      {
+        "node_id": "entity_66",
+        "score": 0.725682
+      },
+      {
+        "node_id": "community_13",
+        "score": 0.468551
+      },
+      {
+        "node_id": "entity_82",
+        "score": 0.434598
+      },
+      {
+        "node_id": "entity_15",
+        "score": 0.403689
+      },
+      {
+        "node_id": "keyword_21",
+        "score": 0.403689
+      },
+      {
+        "node_id": "attribute_106",
+        "score": 0.393287
+      },
+      {
+        "node_id": "synth_empty_desc",
+        "score": 0.383506
+      },
+      {
+        "node_id": "attribute_44",
+        "score": 0.38262
+      },
+      {
+        "node_id": "synth_unicode",
+        "score": 0.380789
+      }
+    ]
+  },
+  {
+    "query": "FC Barcelona football club",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "entity_0",
+        "score": 0.789372
+      },
+      {
+        "node_id": "keyword_14",
+        "score": 0.789372
+      },
+      {
+        "node_id": "community_13",
+        "score": 0.731468
+      },
+      {
+        "node_id": "attribute_1",
+        "score": 0.656127
+      },
+      {
+        "node_id": "entity_79",
+        "score": 0.655475
+      },
+      {
+        "node_id": "keyword_127",
+        "score": 0.655475
+      },
+      {
+        "node_id": "attribute_98",
+        "score": 0.625923
+      },
+      {
+        "node_id": "attribute_106",
+        "score": 0.624084
+      },
+      {
+        "node_id": "community_49",
+        "score": 0.623687
+      },
+      {
+        "node_id": "community_25",
+        "score": 0.613795
+      }
+    ]
+  },
+  {
+    "query": "Copa del Rey tournament",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "entity_3",
+        "score": 0.789189
+      },
+      {
+        "node_id": "keyword_29",
+        "score": 0.789189
+      },
+      {
+        "node_id": "community_22",
+        "score": 0.625377
+      },
+      {
+        "node_id": "attribute_28",
+        "score": 0.607292
+      },
+      {
+        "node_id": "entity_77",
+        "score": 0.607213
+      },
+      {
+        "node_id": "keyword_118",
+        "score": 0.607213
+      },
+      {
+        "node_id": "entity_109",
+        "score": 0.587753
+      },
+      {
+        "node_id": "keyword_124",
+        "score": 0.587753
+      },
+      {
+        "node_id": "attribute_27",
+        "score": 0.516234
+      },
+      {
+        "node_id": "entity_5",
+        "score": 0.506434
+      }
+    ]
+  },
+  {
+    "query": "Diego Maradona transfer fee",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "attribute_17",
+        "score": 0.591015
+      },
+      {
+        "node_id": "entity_15",
+        "score": 0.565014
+      },
+      {
+        "node_id": "keyword_21",
+        "score": 0.565014
+      },
+      {
+        "node_id": "entity_68",
+        "score": 0.518086
+      },
+      {
+        "node_id": "keyword_87",
+        "score": 0.518086
+      },
+      {
+        "node_id": "entity_5",
+        "score": 0.390074
+      },
+      {
+        "node_id": "keyword_42",
+        "score": 0.390074
+      },
+      {
+        "node_id": "entity_3",
+        "score": 0.365479
+      },
+      {
+        "node_id": "keyword_29",
+        "score": 0.365479
+      },
+      {
+        "node_id": "entity_19",
+        "score": 0.342941
+      }
+    ]
+  },
+  {
+    "query": "Champions League knockout",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "entity_12",
+        "score": 0.644656
+      },
+      {
+        "node_id": "keyword_93",
+        "score": 0.644656
+      },
+      {
+        "node_id": "entity_52",
+        "score": 0.528212
+      },
+      {
+        "node_id": "keyword_54",
+        "score": 0.528212
+      },
+      {
+        "node_id": "entity_0",
+        "score": 0.49133
+      },
+      {
+        "node_id": "keyword_14",
+        "score": 0.49133
+      },
+      {
+        "node_id": "entity_113",
+        "score": 0.482417
+      },
+      {
+        "node_id": "entity_6",
+        "score": 0.478665
+      },
+      {
+        "node_id": "entity_79",
+        "score": 0.47408
+      },
+      {
+        "node_id": "keyword_127",
+        "score": 0.47408
+      }
+    ]
+  },
+  {
+    "query": "La Liga winners",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "entity_5",
+        "score": 0.762236
+      },
+      {
+        "node_id": "keyword_42",
+        "score": 0.762236
+      },
+      {
+        "node_id": "attribute_28",
+        "score": 0.652437
+      },
+      {
+        "node_id": "entity_109",
+        "score": 0.637775
+      },
+      {
+        "node_id": "keyword_124",
+        "score": 0.637775
+      },
+      {
+        "node_id": "entity_52",
+        "score": 0.58873
+      },
+      {
+        "node_id": "keyword_54",
+        "score": 0.58873
+      },
+      {
+        "node_id": "entity_4",
+        "score": 0.583972
+      },
+      {
+        "node_id": "keyword_31",
+        "score": 0.583972
+      },
+      {
+        "node_id": "entity_77",
+        "score": 0.579046
+      }
+    ]
+  },
+  {
+    "query": "Barcelona manager coach",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "community_25",
+        "score": 0.673384
+      },
+      {
+        "node_id": "attribute_24",
+        "score": 0.574351
+      },
+      {
+        "node_id": "entity_0",
+        "score": 0.56259
+      },
+      {
+        "node_id": "keyword_14",
+        "score": 0.56259
+      },
+      {
+        "node_id": "attribute_106",
+        "score": 0.55865
+      },
+      {
+        "node_id": "entity_79",
+        "score": 0.528595
+      },
+      {
+        "node_id": "keyword_127",
+        "score": 0.528595
+      },
+      {
+        "node_id": "entity_34",
+        "score": 0.522008
+      },
+      {
+        "node_id": "keyword_51",
+        "score": 0.522008
+      },
+      {
+        "node_id": "attribute_98",
+        "score": 0.487196
+      }
+    ]
+  },
+  {
+    "query": "Ronaldinho fitness",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "entity_82",
+        "score": 0.62346
+      },
+      {
+        "node_id": "keyword_80",
+        "score": 0.473893
+      },
+      {
+        "node_id": "entity_66",
+        "score": 0.473893
+      },
+      {
+        "node_id": "attribute_69",
+        "score": 0.451489
+      },
+      {
+        "node_id": "attribute_16",
+        "score": 0.448657
+      },
+      {
+        "node_id": "attribute_83",
+        "score": 0.417309
+      },
+      {
+        "node_id": "attribute_44",
+        "score": 0.408382
+      },
+      {
+        "node_id": "community_13",
+        "score": 0.397776
+      },
+      {
+        "node_id": "attribute_91",
+        "score": 0.395152
+      },
+      {
+        "node_id": "attribute_106",
+        "score": 0.392278
+      }
+    ]
+  },
+  {
+    "query": "中国科技公司",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "synth_chinese",
+        "score": 0.902166
+      },
+      {
+        "node_id": "entity_90",
+        "score": 0.316351
+      },
+      {
+        "node_id": "synth_list_name",
+        "score": 0.276052
+      },
+      {
+        "node_id": "attribute_119",
+        "score": 0.25848
+      },
+      {
+        "node_id": "attribute_33",
+        "score": 0.248511
+      },
+      {
+        "node_id": "attribute_100",
+        "score": 0.212347
+      },
+      {
+        "node_id": "entity_34",
+        "score": 0.209914
+      },
+      {
+        "node_id": "keyword_51",
+        "score": 0.209914
+      },
+      {
+        "node_id": "attribute_114",
+        "score": 0.201933
+      },
+      {
+        "node_id": "entity_74",
+        "score": 0.187317
+      }
+    ]
+  },
+  {
+    "query": "Argentine footballer diacritics",
+    "top_k": 10,
+    "results": [
+      {
+        "node_id": "synth_unicode",
+        "score": 0.750258
+      },
+      {
+        "node_id": "entity_19",
+        "score": 0.454204
+      },
+      {
+        "node_id": "attribute_16",
+        "score": 0.45191
+      },
+      {
+        "node_id": "entity_15",
+        "score": 0.448895
+      },
+      {
+        "node_id": "keyword_21",
+        "score": 0.448895
+      },
+      {
+        "node_id": "entity_73",
+        "score": 0.437683
+      },
+      {
+        "node_id": "keyword_104",
+        "score": 0.437683
+      },
+      {
+        "node_id": "attribute_44",
+        "score": 0.427008
+      },
+      {
+        "node_id": "entity_5",
+        "score": 0.410374
+      },
+      {
+        "node_id": "keyword_42",
+        "score": 0.410374
+      }
+    ]
+  }
+]

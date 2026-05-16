@@ -1,0 +1,17 @@
+{
+  "exported_at": "2026-03-11T23:07:14+0800",
+  "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+  "artifact_bundle_sha256_prefix": "0832f60ef6dee81a",
+  "artifact_hashes": {
+    "model.onnx": "eee56308e9b7c343",
+    "model.onnx.data": "184f6f1c221aa16a",
+    "tokenizer.json": "da0e79933b9ed517",
+    "tokenizer_config.json": "7157371fc530fa70"
+  },
+  "onnx_opset": 18,
+  "sentence_transformers_version": "5.2.3",
+  "torch_version": "2.10.0",
+  "graph_source": "/Users/likun/Desktop/workspace-for-youtu-graph/youtu-graphrag/output/graphs/demo_new.json",
+  "snapshot_format": "phase1_graph_snapshot_v1",
+  "note": "All artifacts exported atomically from the same model instance. Snapshot is the augmented Phase 1 graph and includes synthetic edge-case nodes."
+}

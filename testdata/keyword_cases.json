@@ -1,0 +1,177 @@
+[
+  {
+    "query": "Barcelona football",
+    "terms_used": [
+      "barcelona",
+      "football"
+    ],
+    "expected_node_ids": [
+      "attribute_1",
+      "attribute_100",
+      "attribute_105",
+      "attribute_115",
+      "attribute_27",
+      "attribute_28",
+      "attribute_37",
+      "attribute_40",
+      "attribute_41",
+      "attribute_55",
+      "attribute_69",
+      "attribute_85",
+      "attribute_86",
+      "attribute_88",
+      "attribute_91",
+      "attribute_92",
+      "community_122",
+      "community_13",
+      "community_22",
+      "community_25",
+      "community_38",
+      "community_49",
+      "community_53",
+      "entity_71",
+      "synth_list_name"
+    ]
+  },
+  {
+    "query": "Messi academy",
+    "terms_used": [
+      "messi",
+      "academy"
+    ],
+    "expected_node_ids": []
+  },
+  {
+    "query": "Real Madrid champions",
+    "terms_used": [
+      "real",
+      "madrid",
+      "champions"
+    ],
+    "expected_node_ids": [
+      "community_38",
+      "entity_12",
+      "entity_4",
+      "keyword_31",
+      "keyword_93"
+    ]
+  },
+  {
+    "query": "Copa del Rey",
+    "terms_used": [
+      "copa",
+      "del",
+      "rey"
+    ],
+    "expected_node_ids": [
+      "community_22",
+      "entity_3",
+      "entity_77",
+      "keyword_118",
+      "keyword_29"
+    ]
+  },
+  {
+    "query": "Maradona transfer Napoli",
+    "terms_used": [
+      "maradona",
+      "transfer",
+      "napoli"
+    ],
+    "expected_node_ids": []
+  },
+  {
+    "query": "Champions League",
+    "terms_used": [
+      "champions",
+      "league"
+    ],
+    "expected_node_ids": [
+      "community_122",
+      "community_38",
+      "entity_12",
+      "keyword_93"
+    ]
+  },
+  {
+    "query": "football club manager coach",
+    "terms_used": [
+      "football",
+      "club",
+      "manager",
+      "coach"
+    ],
+    "expected_node_ids": [
+      "attribute_1",
+      "attribute_100",
+      "attribute_105",
+      "attribute_115",
+      "attribute_27",
+      "attribute_28",
+      "attribute_37",
+      "attribute_40",
+      "attribute_41",
+      "attribute_55",
+      "attribute_69",
+      "attribute_85",
+      "attribute_86",
+      "attribute_88",
+      "attribute_91",
+      "attribute_92",
+      "community_122",
+      "community_22",
+      "community_38",
+      "community_53",
+      "entity_11",
+      "entity_71",
+      "keyword_89",
+      "synth_list_name"
+    ]
+  },
+  {
+    "query": "season trophies",
+    "terms_used": [
+      "season",
+      "trophies"
+    ],
+    "expected_node_ids": []
+  },
+  {
+    "query": "深圳总部",
+    "terms_used": [
+      "深圳总部"
+    ],
+    "expected_node_ids": [
+      "synth_chinese"
+    ]
+  },
+  {
+    "query": "listnodecoverage",
+    "terms_used": [
+      "listnodecoverage"
+    ],
+    "expected_node_ids": [
+      "synth_list_name"
+    ]
+  },
+  {
+    "query": "Unknown Player",
+    "terms_used": [
+      "unknown",
+      "player"
+    ],
+    "expected_node_ids": [
+      "synth_empty_desc"
+    ]
+  },
+  {
+    "query": "Argentine footballer",
+    "terms_used": [
+      "argentine",
+      "footballer"
+    ],
+    "expected_node_ids": [
+      "synth_unicode"
+    ]
+  }
+]

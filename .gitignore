@@ -1,0 +1,27 @@
+.DS_Store
+
+# Local Python/runtime environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local models and generated runtime artifacts
+models/
+retriever/
+output/
+*.index
+*.pt
+*.npy
+*.pkl
+
+# Go build/test output
+bin/
+dist/
+coverage.out
+*.test
+
+# Editor/local workspace files
+*.code-workspace
+.idea/
+.vscode/

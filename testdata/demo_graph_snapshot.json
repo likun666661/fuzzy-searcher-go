@@ -1,0 +1,2734 @@
+{
+  "format": "phase1_graph_snapshot_v1",
+  "source_graph": "/Users/likun/Desktop/workspace-for-youtu-graph/youtu-graphrag/output/graphs/demo_new.json",
+  "includes_synthetic_nodes": true,
+  "nodes": [
+    {
+      "id": "attribute_1",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "type: football club",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_100",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "type: football federation",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_101",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "abbreviation: RFEF",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_102",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "relation: teammate",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_105",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "type: youth football team",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_106",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: Barcelona's greatest-ever youth side",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_107",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "achievement: unprecedented treble winner",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_114",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "location: England",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_115",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "type: football match",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_116",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: partido de la máscara (final of the mask)",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_117",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "score: 4-1 victory",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_119",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "type: medical equipment",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_120",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "purpose: facial protection",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_16",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "position: footballer",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_17",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "transfer_fee: 5 million",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_18",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: transferred",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_2",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: active",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_24",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "position: coach",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_27",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "type: football tournament",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_28",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: Spanish football cup competition",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_30",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: champions",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_33",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "position: manager",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_37",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "time: football season",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_40",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "type: football league",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_41",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: Spanish football league",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_44",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "position: German midfielder",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_48",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "type: city",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "attribute_55",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: football season",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_58",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: blamed for injuries",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_63",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "position: leading scorer",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_64",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: injured",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_67",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "position: rising star",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_69",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "position: football player",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_7",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: favourites",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_70",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: completed growth hormone treatment aged 14",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_8",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: started strongly",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_83",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: lack of fitness affected form",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_85",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: football team",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_86",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: famous football goal",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_88",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: international football competition",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_9",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: finished without trophies",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_91",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: Brazilian football side",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_92",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "description: European football competition",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_95",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "status: eventual runners-up",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "attribute_97",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "type: youth academy",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "attribute_98",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": "location: Barcelona",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "community_122",
+      "label": "community",
+      "level": 4,
+      "properties": {
+        "name": "English-League",
+        "description": "Community discussing league football matters specifically within the context of England.",
+        "members": [
+          "league",
+          "England"
+        ]
+      }
+    },
+    {
+      "id": "community_13",
+      "label": "community",
+      "level": 4,
+      "properties": {
+        "name": "FC-Barcelona-Legends",
+        "description": "A community of legendary FC Barcelona players and associated clubs, including icons like Messi, Ronaldinho, and Maradona.",
+        "members": [
+          "FC Barcelona",
+          "Diego Maradona",
+          "Bernd Schuster",
+          "Eto'o",
+          "Lionel Messi",
+          "Ronaldinho",
+          "Liverpool",
+          "Cesc Fàbregas",
+          "Gerard Piqué",
+          "Baby Dream Team",
+          "Arsenal"
+        ]
+      }
+    },
+    {
+      "id": "community_22",
+      "label": "community",
+      "level": 4,
+      "properties": {
+        "name": "Spanish-Football-Competitions",
+        "description": "A network of major Spanish and international football competitions, clubs, and governing bodies like La Liga and Copa del Rey.",
+        "members": [
+          "Boca Juniors",
+          "Copa del Rey",
+          "Real Madrid",
+          "Napoli",
+          "La Liga",
+          "European Cup",
+          "Steaua Bucureşti",
+          "Getafe",
+          "Internacional",
+          "Royal Spanish Football Federation",
+          "Cadetes A",
+          "Espanyol",
+          "Copa Catalunya final"
+        ]
+      }
+    },
+    {
+      "id": "community_25",
+      "label": "community",
+      "level": 4,
+      "properties": {
+        "name": "Barcelona-Managers",
+        "description": "A group centered on Luis and featuring notable FC Barcelona managers like Frank Rijkaard and Terry Venables.",
+        "members": [
+          "Luis",
+          "Terry Venables",
+          "manager",
+          "Frank Rijkaard"
+        ]
+      }
+    },
+    {
+      "id": "community_38",
+      "label": "community",
+      "level": 4,
+      "properties": {
+        "name": "Historic-Football-Seasons",
+        "description": "A group of significant football seasons and landmark achievements, including Maradona's goal and the Champions League.",
+        "members": [
+          "1984–85 season",
+          "2006-07 season",
+          "Diego Maradona's goal of the century",
+          "2006 FIFA Club World Cup",
+          "Champions League"
+        ]
+      }
+    },
+    {
+      "id": "community_49",
+      "label": "community",
+      "level": 4,
+      "properties": {
+        "name": "Andalusian-Football",
+        "description": "A small community connecting the city of Seville with the famed FC Barcelona youth academy, La Masia.",
+        "members": [
+          "Seville",
+          "La Masia"
+        ]
+      }
+    },
+    {
+      "id": "community_53",
+      "label": "community",
+      "level": 4,
+      "properties": {
+        "name": "European-Spanish-Competitions",
+        "description": "Community centered around major European and Spanish football competitions, including Barcelona's domestic and international cup campaigns.",
+        "members": [
+          "European Cup final",
+          "Spanish cup",
+          "Catalan cup",
+          "Barcelona",
+          "Spain"
+        ]
+      }
+    },
+    {
+      "id": "community_60",
+      "label": "community",
+      "level": 4,
+      "properties": {
+        "name": "US-Tour-Injuries",
+        "description": "Community focused on the pre-season US tour, impacted by a string of injuries and equipment protection.",
+        "members": [
+          "pre-season US tour",
+          "string of injuries",
+          "plastic protector"
+        ]
+      }
+    },
+    {
+      "id": "entity_0",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "FC Barcelona",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_10",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "2006-07 season",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "time_period"
+      }
+    },
+    {
+      "id": "entity_103",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "England",
+        "chunk id": "CbHylu8o",
+        "schema_type": "location"
+      }
+    },
+    {
+      "id": "entity_108",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "league",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "entity_109",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Spanish cup",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "entity_11",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "2006 FIFA Club World Cup",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "event"
+      }
+    },
+    {
+      "id": "entity_110",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Catalan cup",
+        "chunk id": "CbHylu8o"
+      }
+    },
+    {
+      "id": "entity_112",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Espanyol",
+        "chunk id": "CbHylu8o",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_113",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Arsenal",
+        "chunk id": "CbHylu8o",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_12",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Champions League",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "event"
+      }
+    },
+    {
+      "id": "entity_126",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Spain",
+        "chunk id": "CbHylu8o",
+        "schema_type": "location"
+      }
+    },
+    {
+      "id": "entity_15",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Diego Maradona",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_19",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Boca Juniors",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_20",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Napoli",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_23",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Luis",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_3",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Copa del Rey",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "event"
+      }
+    },
+    {
+      "id": "entity_32",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Terry Venables",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_34",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "manager",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "entity_36",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "1984–85 season",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "time_period"
+      }
+    },
+    {
+      "id": "entity_4",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Real Madrid",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_43",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Bernd Schuster",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_46",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Steaua Bucureşti",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_47",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Seville",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "location"
+      }
+    },
+    {
+      "id": "entity_5",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "La Liga",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "event"
+      }
+    },
+    {
+      "id": "entity_52",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "European Cup final",
+        "chunk id": "0FCIUkTr"
+      }
+    },
+    {
+      "id": "entity_57",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "pre-season US tour",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "event"
+      }
+    },
+    {
+      "id": "entity_59",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "string of injuries",
+        "chunk id": "rpQTmzHn"
+      }
+    },
+    {
+      "id": "entity_6",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "European Cup",
+        "chunk id": "0FCIUkTr",
+        "schema_type": "event"
+      }
+    },
+    {
+      "id": "entity_62",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Eto'o",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_65",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Frank Rijkaard",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_66",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Lionel Messi",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_68",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Diego Maradona's goal of the century",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "event"
+      }
+    },
+    {
+      "id": "entity_71",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Royal Spanish Football Federation",
+        "chunk id": "CbHylu8o",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_72",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "La Masia",
+        "chunk id": "CbHylu8o",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_73",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Cesc Fàbregas",
+        "chunk id": "CbHylu8o",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_74",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Gerard Piqué",
+        "chunk id": "CbHylu8o",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_75",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Baby Dream Team",
+        "chunk id": "CbHylu8o",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_76",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Cadetes A",
+        "chunk id": "CbHylu8o",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_77",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Copa Catalunya final",
+        "chunk id": "CbHylu8o",
+        "schema_type": "event"
+      }
+    },
+    {
+      "id": "entity_78",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "plastic protector",
+        "chunk id": "CbHylu8o",
+        "schema_type": "object"
+      }
+    },
+    {
+      "id": "entity_79",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Barcelona",
+        "chunk id": "CbHylu8o",
+        "schema_type": "location"
+      }
+    },
+    {
+      "id": "entity_82",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Ronaldinho",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "entity_84",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Getafe",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_90",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Internacional",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "entity_94",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Liverpool",
+        "chunk id": "rpQTmzHn",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "keyword_104",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Cesc Fàbregas"
+      }
+    },
+    {
+      "id": "keyword_111",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Cadetes A"
+      }
+    },
+    {
+      "id": "keyword_118",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Copa Catalunya final"
+      }
+    },
+    {
+      "id": "keyword_121",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "plastic protector"
+      }
+    },
+    {
+      "id": "keyword_123",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "league"
+      }
+    },
+    {
+      "id": "keyword_124",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Spanish cup"
+      }
+    },
+    {
+      "id": "keyword_125",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Catalan cup"
+      }
+    },
+    {
+      "id": "keyword_127",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Barcelona"
+      }
+    },
+    {
+      "id": "keyword_128",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Spain"
+      }
+    },
+    {
+      "id": "keyword_129",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "England"
+      }
+    },
+    {
+      "id": "keyword_14",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "FC Barcelona"
+      }
+    },
+    {
+      "id": "keyword_21",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Diego Maradona"
+      }
+    },
+    {
+      "id": "keyword_26",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Luis"
+      }
+    },
+    {
+      "id": "keyword_29",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Copa del Rey"
+      }
+    },
+    {
+      "id": "keyword_31",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Real Madrid"
+      }
+    },
+    {
+      "id": "keyword_35",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Terry Venables"
+      }
+    },
+    {
+      "id": "keyword_39",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "1984–85 season"
+      }
+    },
+    {
+      "id": "keyword_42",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "La Liga"
+      }
+    },
+    {
+      "id": "keyword_45",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Bernd Schuster"
+      }
+    },
+    {
+      "id": "keyword_50",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Seville"
+      }
+    },
+    {
+      "id": "keyword_51",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "manager"
+      }
+    },
+    {
+      "id": "keyword_54",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "European Cup final"
+      }
+    },
+    {
+      "id": "keyword_56",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "2006-07 season"
+      }
+    },
+    {
+      "id": "keyword_61",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "pre-season US tour"
+      }
+    },
+    {
+      "id": "keyword_80",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Lionel Messi"
+      }
+    },
+    {
+      "id": "keyword_81",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Frank Rijkaard"
+      }
+    },
+    {
+      "id": "keyword_87",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Diego Maradona's goal of the century"
+      }
+    },
+    {
+      "id": "keyword_89",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "2006 FIFA Club World Cup"
+      }
+    },
+    {
+      "id": "keyword_93",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "Champions League"
+      }
+    },
+    {
+      "id": "keyword_96",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "string of injuries"
+      }
+    },
+    {
+      "id": "keyword_99",
+      "label": "keyword",
+      "level": 3,
+      "properties": {
+        "name": "La Masia"
+      }
+    },
+    {
+      "id": "synth_chinese",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "腾讯",
+        "description": "中国科技公司 深圳总部",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "synth_empty_desc",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Unknown Player",
+        "schema_type": "person"
+      }
+    },
+    {
+      "id": "synth_list_name",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": [
+          "Guangzhou",
+          "Evergrande",
+          "FC"
+        ],
+        "description": "Chinese football club listnodecoverage",
+        "schema_type": "organization"
+      }
+    },
+    {
+      "id": "synth_numeric_name",
+      "label": "attribute",
+      "level": 1,
+      "properties": {
+        "name": 12345,
+        "description": null
+      }
+    },
+    {
+      "id": "synth_unicode",
+      "label": "entity",
+      "level": 2,
+      "properties": {
+        "name": "Ángel Di María",
+        "description": "Argentine footballer with diacritics",
+        "schema_type": "person"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "entity_0",
+      "target": "attribute_1",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_0",
+      "target": "attribute_2",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_0",
+      "target": "attribute_7",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_0",
+      "target": "attribute_8",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_0",
+      "target": "attribute_9",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_0",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_0",
+      "target": "entity_10",
+      "key": 0,
+      "relation": "participates_in"
+    },
+    {
+      "source": "entity_0",
+      "target": "entity_11",
+      "key": 0,
+      "relation": "participates_in"
+    },
+    {
+      "source": "entity_0",
+      "target": "entity_12",
+      "key": 0,
+      "relation": "participates_in"
+    },
+    {
+      "source": "entity_0",
+      "target": "entity_3",
+      "key": 0,
+      "relation": "participates_in"
+    },
+    {
+      "source": "entity_0",
+      "target": "entity_3",
+      "key": 1,
+      "relation": "participates_in"
+    },
+    {
+      "source": "entity_0",
+      "target": "entity_4",
+      "key": 0,
+      "relation": "defeated"
+    },
+    {
+      "source": "entity_0",
+      "target": "entity_5",
+      "key": 0,
+      "relation": "won"
+    },
+    {
+      "source": "entity_0",
+      "target": "entity_5",
+      "key": 1,
+      "relation": "located_in"
+    },
+    {
+      "source": "entity_0",
+      "target": "entity_6",
+      "key": 0,
+      "relation": "participates_in"
+    },
+    {
+      "source": "entity_0",
+      "target": "keyword_14",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_0",
+      "target": "keyword_14",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_10",
+      "target": "attribute_55",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_10",
+      "target": "community_38",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_10",
+      "target": "keyword_56",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_10",
+      "target": "keyword_56",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_103",
+      "target": "community_122",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_103",
+      "target": "keyword_129",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_103",
+      "target": "keyword_129",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_108",
+      "target": "community_122",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_108",
+      "target": "keyword_123",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_108",
+      "target": "keyword_123",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_109",
+      "target": "community_53",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_109",
+      "target": "keyword_124",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_109",
+      "target": "keyword_124",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_11",
+      "target": "attribute_88",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_11",
+      "target": "community_38",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_11",
+      "target": "keyword_89",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_11",
+      "target": "keyword_89",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_110",
+      "target": "community_53",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_110",
+      "target": "keyword_125",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_110",
+      "target": "keyword_125",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_112",
+      "target": "attribute_1",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_112",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_113",
+      "target": "attribute_1",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_113",
+      "target": "attribute_114",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_113",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_113",
+      "target": "entity_66",
+      "key": 0,
+      "relation": "made offer to"
+    },
+    {
+      "source": "entity_12",
+      "target": "attribute_92",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_12",
+      "target": "community_38",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_12",
+      "target": "keyword_93",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_12",
+      "target": "keyword_93",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_126",
+      "target": "community_53",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_126",
+      "target": "keyword_128",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_126",
+      "target": "keyword_128",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_15",
+      "target": "attribute_16",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_15",
+      "target": "attribute_17",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_15",
+      "target": "attribute_18",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_15",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_15",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "belongs_to"
+    },
+    {
+      "source": "entity_15",
+      "target": "entity_19",
+      "key": 0,
+      "relation": "transferred_from"
+    },
+    {
+      "source": "entity_15",
+      "target": "entity_20",
+      "key": 0,
+      "relation": "transferred_to"
+    },
+    {
+      "source": "entity_15",
+      "target": "keyword_21",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_15",
+      "target": "keyword_21",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_19",
+      "target": "attribute_1",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_19",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_20",
+      "target": "attribute_1",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_20",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_23",
+      "target": "attribute_24",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_23",
+      "target": "community_25",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_23",
+      "target": "keyword_26",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_23",
+      "target": "keyword_26",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_3",
+      "target": "attribute_27",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_3",
+      "target": "attribute_28",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_3",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_3",
+      "target": "keyword_29",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_3",
+      "target": "keyword_29",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_32",
+      "target": "attribute_33",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_32",
+      "target": "community_25",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_32",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "belongs_to"
+    },
+    {
+      "source": "entity_32",
+      "target": "entity_34",
+      "key": 0,
+      "relation": "is_a"
+    },
+    {
+      "source": "entity_32",
+      "target": "keyword_35",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_32",
+      "target": "keyword_35",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_34",
+      "target": "community_25",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_34",
+      "target": "keyword_51",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_34",
+      "target": "keyword_51",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_36",
+      "target": "attribute_37",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_36",
+      "target": "community_38",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_36",
+      "target": "keyword_39",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_36",
+      "target": "keyword_39",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_4",
+      "target": "attribute_1",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_4",
+      "target": "attribute_30",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_4",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_4",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "precedes"
+    },
+    {
+      "source": "entity_4",
+      "target": "keyword_31",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_4",
+      "target": "keyword_31",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_43",
+      "target": "attribute_44",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_43",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_43",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "belongs_to"
+    },
+    {
+      "source": "entity_43",
+      "target": "keyword_45",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_43",
+      "target": "keyword_45",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_46",
+      "target": "attribute_1",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_46",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_46",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "defeated"
+    },
+    {
+      "source": "entity_47",
+      "target": "attribute_48",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_47",
+      "target": "community_49",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_47",
+      "target": "keyword_50",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_47",
+      "target": "keyword_50",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_5",
+      "target": "attribute_40",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_5",
+      "target": "attribute_41",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_5",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_5",
+      "target": "keyword_42",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_5",
+      "target": "keyword_42",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_52",
+      "target": "community_53",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_52",
+      "target": "entity_47",
+      "key": 0,
+      "relation": "located_in"
+    },
+    {
+      "source": "entity_52",
+      "target": "keyword_54",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_52",
+      "target": "keyword_54",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_57",
+      "target": "attribute_58",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_57",
+      "target": "community_60",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_57",
+      "target": "entity_59",
+      "key": 0,
+      "relation": "influences"
+    },
+    {
+      "source": "entity_57",
+      "target": "keyword_61",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_57",
+      "target": "keyword_61",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_59",
+      "target": "community_60",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_59",
+      "target": "keyword_96",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_59",
+      "target": "keyword_96",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_6",
+      "target": "attribute_27",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_6",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_62",
+      "target": "attribute_63",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_62",
+      "target": "attribute_64",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_62",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_62",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "belongs_to"
+    },
+    {
+      "source": "entity_62",
+      "target": "entity_65",
+      "key": 0,
+      "relation": "related_to"
+    },
+    {
+      "source": "entity_65",
+      "target": "attribute_24",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_65",
+      "target": "community_25",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_65",
+      "target": "keyword_81",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_65",
+      "target": "keyword_81",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_66",
+      "target": "attribute_64",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_66",
+      "target": "attribute_67",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_66",
+      "target": "attribute_69",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_66",
+      "target": "attribute_70",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_66",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "belongs_to"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_68",
+      "key": 0,
+      "relation": "comparable_to"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_71",
+      "key": 0,
+      "relation": "enrolled in"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_72",
+      "key": 0,
+      "relation": "studied at"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_73",
+      "key": 0,
+      "relation": "befriended"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_74",
+      "key": 0,
+      "relation": "befriended"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_75",
+      "key": 0,
+      "relation": "part_of"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_76",
+      "key": 0,
+      "relation": "part_of"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_77",
+      "key": 0,
+      "relation": "participates_in"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_78",
+      "key": 0,
+      "relation": "used_by"
+    },
+    {
+      "source": "entity_66",
+      "target": "entity_79",
+      "key": 0,
+      "relation": "chose to remain in"
+    },
+    {
+      "source": "entity_66",
+      "target": "keyword_80",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_66",
+      "target": "keyword_80",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_68",
+      "target": "attribute_86",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_68",
+      "target": "community_38",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_68",
+      "target": "keyword_87",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_68",
+      "target": "keyword_87",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_71",
+      "target": "attribute_100",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_71",
+      "target": "attribute_101",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_71",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_72",
+      "target": "attribute_97",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_72",
+      "target": "attribute_98",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_72",
+      "target": "community_49",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_72",
+      "target": "keyword_99",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_72",
+      "target": "keyword_99",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_73",
+      "target": "attribute_102",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_73",
+      "target": "attribute_69",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_73",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_73",
+      "target": "entity_103",
+      "key": 0,
+      "relation": "left for"
+    },
+    {
+      "source": "entity_73",
+      "target": "keyword_104",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_73",
+      "target": "keyword_104",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_74",
+      "target": "attribute_102",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_74",
+      "target": "attribute_69",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_74",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_74",
+      "target": "entity_103",
+      "key": 0,
+      "relation": "left for"
+    },
+    {
+      "source": "entity_75",
+      "target": "attribute_105",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_75",
+      "target": "attribute_106",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_75",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_76",
+      "target": "attribute_105",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_76",
+      "target": "attribute_107",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_76",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_76",
+      "target": "entity_108",
+      "key": 0,
+      "relation": "won"
+    },
+    {
+      "source": "entity_76",
+      "target": "entity_109",
+      "key": 0,
+      "relation": "won"
+    },
+    {
+      "source": "entity_76",
+      "target": "entity_110",
+      "key": 0,
+      "relation": "won"
+    },
+    {
+      "source": "entity_76",
+      "target": "keyword_111",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_76",
+      "target": "keyword_111",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_77",
+      "target": "attribute_115",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_77",
+      "target": "attribute_116",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_77",
+      "target": "attribute_117",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_77",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_77",
+      "target": "keyword_118",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_77",
+      "target": "keyword_118",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_78",
+      "target": "attribute_119",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_78",
+      "target": "attribute_120",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_78",
+      "target": "community_60",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_78",
+      "target": "keyword_121",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_78",
+      "target": "keyword_121",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_79",
+      "target": "community_53",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_79",
+      "target": "entity_126",
+      "key": 0,
+      "relation": "located_in"
+    },
+    {
+      "source": "entity_79",
+      "target": "keyword_127",
+      "key": 0,
+      "relation": "represented_by"
+    },
+    {
+      "source": "entity_79",
+      "target": "keyword_127",
+      "key": 1,
+      "relation": "kw_filter_by"
+    },
+    {
+      "source": "entity_82",
+      "target": "attribute_83",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_82",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_82",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "belongs_to"
+    },
+    {
+      "source": "entity_84",
+      "target": "attribute_85",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_84",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_90",
+      "target": "attribute_91",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_90",
+      "target": "community_22",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_90",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "related_to"
+    },
+    {
+      "source": "entity_94",
+      "target": "attribute_95",
+      "key": 0,
+      "relation": "has_attribute"
+    },
+    {
+      "source": "entity_94",
+      "target": "community_13",
+      "key": 0,
+      "relation": "member_of"
+    },
+    {
+      "source": "entity_94",
+      "target": "entity_0",
+      "key": 0,
+      "relation": "related_to"
+    },
+    {
+      "source": "keyword_104",
+      "target": "community_13",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_111",
+      "target": "community_22",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_118",
+      "target": "community_22",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_121",
+      "target": "community_60",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_123",
+      "target": "community_122",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_124",
+      "target": "community_53",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_125",
+      "target": "community_53",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_127",
+      "target": "community_53",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_128",
+      "target": "community_53",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_129",
+      "target": "community_122",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_14",
+      "target": "community_13",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_21",
+      "target": "community_13",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_26",
+      "target": "community_25",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_29",
+      "target": "community_22",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_31",
+      "target": "community_22",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_35",
+      "target": "community_25",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_39",
+      "target": "community_38",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_42",
+      "target": "community_22",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_45",
+      "target": "community_13",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_50",
+      "target": "community_49",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_51",
+      "target": "community_25",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_54",
+      "target": "community_53",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_56",
+      "target": "community_38",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_61",
+      "target": "community_60",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_80",
+      "target": "community_13",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_81",
+      "target": "community_25",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_87",
+      "target": "community_38",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_89",
+      "target": "community_38",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_93",
+      "target": "community_38",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_96",
+      "target": "community_60",
+      "key": 0,
+      "relation": "keyword_of"
+    },
+    {
+      "source": "keyword_99",
+      "target": "community_49",
+      "key": 0,
+      "relation": "keyword_of"
+    }
+  ]
+}
