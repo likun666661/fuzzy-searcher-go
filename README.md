@@ -43,6 +43,18 @@ go run ./cmd/youtu-retriever retrieve \
   --top-k 20
 ```
 
+When a Python vector sidecar is running, pass `--sidecar-url` to enable chunk FAISS retrieval:
+
+```bash
+go run ./cmd/youtu-retriever retrieve \
+  --graph ../youtu-graphrag/output/graphs/demo_new.json \
+  --chunks ../youtu-graphrag/output/chunks/demo.txt \
+  --dataset demo \
+  --question "When was the person who Messi's goals in Copa del Rey compared to get signed by Barcelona?" \
+  --top-k 20 \
+  --sidecar-url http://127.0.0.1:8765
+```
+
 It outputs a bare `RetrieveResult` JSON object:
 
 ```json

@@ -12,6 +12,7 @@ type RetrieveRequest struct {
 	Question      string        `json:"question"`
 	TopK          int           `json:"top_k,omitempty"`
 	InvolvedTypes InvolvedTypes `json:"involved_types,omitempty"`
+	Dataset       string        `json:"dataset,omitempty"`
 }
 
 // RetrieveResult is the JSON contract consumed by harnesses and backend glue.

@@ -10,6 +10,7 @@ import (
 	"github.com/fuzzy-searcher-go/internal/chunks"
 	"github.com/fuzzy-searcher-go/internal/dataset"
 	"github.com/fuzzy-searcher-go/internal/retrieval"
+	"github.com/fuzzy-searcher-go/internal/sidecar"
 )
 
 func main() {
@@ -22,7 +23,9 @@ func main() {
 	chunksPath := flag.String("chunks", "", "Path to chunks txt")
 	question := flag.String("question", "", "Question to retrieve for")
 	topK := flag.Int("top-k", 20, "Max triples to return")
+	datasetName := flag.String("dataset", "demo", "Dataset name for sidecar requests")
 	involvedTypesPath := flag.String("involved-types", "", "Optional involved_types JSON file")
+	sidecarURL := flag.String("sidecar-url", "", "Optional Python sidecar base URL")
 	pretty := flag.Bool("pretty", true, "Pretty-print JSON output")
 	flag.CommandLine.Parse(args)
 
@@ -43,6 +46,7 @@ func main() {
 	req := retrieval.RetrieveRequest{
 		Question: *question,
 		TopK:     *topK,
+		Dataset:  *datasetName,
 	}
 	if *involvedTypesPath != "" {
 		req.InvolvedTypes, err = loadInvolvedTypes(*involvedTypesPath)
@@ -51,7 +55,12 @@ func main() {
 		}
 	}
 
-	result, err := retrieval.NewService(graph, chunkStore).Retrieve(context.Background(), req)
+	opts := []retrieval.Option{}
+	if *sidecarURL != "" {
+		opts = append(opts, retrieval.WithSidecar(sidecar.NewClient(*sidecarURL)))
+	}
+
+	result, err := retrieval.NewService(graph, chunkStore, opts...).Retrieve(context.Background(), req)
 	if err != nil {
 		fatal(err)
 	}
