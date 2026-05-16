@@ -127,3 +127,109 @@ func TestRetrieveWithSidecarChunkResults(t *testing.T) {
 		t.Fatalf("chunk ids = %#v", result.ChunkIDs)
 	}
 }
+
+func TestRetrieveWithSidecarTripleResults(t *testing.T) {
+	graph := &dataset.Graph{
+		Nodes: map[string]*dataset.Node{
+			"n1": {
+				ID:    "n1",
+				Label: "entity",
+				Level: 2,
+				Properties: map[string]any{
+					"name":        "Lionel Messi",
+					"description": "footballer",
+					"schema_type": "person",
+					"chunk id":    "c1",
+				},
+			},
+			"n2": {
+				ID:    "n2",
+				Label: "entity",
+				Level: 2,
+				Properties: map[string]any{
+					"name":        "FC Barcelona",
+					"schema_type": "organization",
+					"chunk id":    "c2",
+				},
+			},
+		},
+		Edges: []dataset.Edge{{Source: "n1", Target: "n2", Relation: "played_for"}},
+	}
+	chunkStore := &chunks.Store{ByID: map[string]string{
+		"c1": "Messi source chunk",
+		"c2": "Barcelona source chunk",
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/embed":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"model":     "test-model",
+				"dimension": 3,
+				"vectors":   [][]float32{{0.1, 0.2, 0.3}},
+			})
+		case "/v1/faiss/search":
+			var req struct {
+				Index string `json:"index"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode search request: %v", err)
+			}
+			hits := []map[string]any{}
+			if req.Index == "chunk" {
+				hits = []map[string]any{
+					{"id": "c1", "score": 0.8, "rank": 1},
+					{"id": "c2", "score": 0.7, "rank": 2},
+				}
+			}
+			if req.Index == "triple" {
+				hits = []map[string]any{
+					{
+						"id":    "n1 | played_for | n2",
+						"score": 0.9,
+						"rank":  1,
+						"item":  []string{"n1", "played_for", "n2"},
+						"triple": map[string]any{
+							"subject_id":       "n1",
+							"relation":         "played_for",
+							"object_id":        "n2",
+							"chunk_ids":        []string{"c1", "c2"},
+							"formatted_triple": "(Lionel Messi footballer [schema_type: person], played_for, FC Barcelona [schema_type: organization])",
+						},
+					},
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"dataset": "demo",
+				"index":   req.Index,
+				"hits":    hits,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	result, err := retrieval.NewService(
+		graph,
+		chunkStore,
+		retrieval.WithSidecar(sidecar.NewClient(server.URL)),
+	).Retrieve(context.Background(), retrieval.RetrieveRequest{
+		Dataset:  "demo",
+		Question: "Messi Barcelona",
+		TopK:     2,
+	})
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	want := "(Lionel Messi footballer [schema_type: person], played_for, FC Barcelona [schema_type: organization]) [score: 0.900]"
+	if len(result.Triples) != 1 || result.Triples[0] != want {
+		t.Fatalf("triples = %#v, want %#v", result.Triples, want)
+	}
+	if len(result.ChunkRetrievalResults) != 2 {
+		t.Fatalf("chunk retrieval results = %#v", result.ChunkRetrievalResults)
+	}
+	if len(result.ChunkIDs) != 2 {
+		t.Fatalf("chunk ids = %#v", result.ChunkIDs)
+	}
+}

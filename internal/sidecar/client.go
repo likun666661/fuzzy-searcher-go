@@ -57,9 +57,24 @@ type SearchResponse struct {
 
 // SearchHit is one sidecar search hit.
 type SearchHit struct {
-	ID    string  `json:"id"`
-	Score float64 `json:"score"`
-	Rank  int     `json:"rank"`
+	ID              string          `json:"id"`
+	Score           float64         `json:"score"`
+	Rank            int             `json:"rank"`
+	Item            json.RawMessage `json:"item,omitempty"`
+	Triple          *TripleMetadata `json:"triple,omitempty"`
+	FormattedTriple string          `json:"formatted_triple,omitempty"`
+	SubjectID       string          `json:"subject_id,omitempty"`
+	Relation        string          `json:"relation,omitempty"`
+	ObjectID        string          `json:"object_id,omitempty"`
+}
+
+// TripleMetadata is additive metadata returned for triple index hits.
+type TripleMetadata struct {
+	SubjectID       string   `json:"subject_id"`
+	Relation        string   `json:"relation"`
+	ObjectID        string   `json:"object_id"`
+	ChunkIDs        []string `json:"chunk_ids,omitempty"`
+	FormattedTriple string   `json:"formatted_triple,omitempty"`
 }
 
 type errorEnvelope struct {

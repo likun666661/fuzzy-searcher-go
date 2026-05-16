@@ -2,6 +2,7 @@ package retrieval
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -70,6 +71,8 @@ func (s *Service) Retrieve(ctx context.Context, req RetrieveRequest) (*RetrieveR
 	chunkIDs := s.chunkIDsFromTriples(triples)
 	chunkRetrievalResults, sidecarChunkIDs, sidecarErr := s.retrieveChunksViaSidecar(ctx, req, topK)
 	chunkIDs = mergeStrings(chunkIDs, sidecarChunkIDs)
+	sidecarTriples, sidecarTripleChunkIDs, sidecarTripleErr := s.retrieveTriplesViaSidecar(ctx, req, topK)
+	chunkIDs = mergeStrings(chunkIDs, sidecarTripleChunkIDs)
 
 	chunkContents := make([]string, 0, len(chunkIDs))
 	for _, id := range chunkIDs {
@@ -77,9 +80,13 @@ func (s *Service) Retrieve(ctx context.Context, req RetrieveRequest) (*RetrieveR
 			chunkContents = append(chunkContents, content)
 		}
 	}
+	formattedTriples := formatTriples(s.graph, triples)
+	if len(sidecarTriples) > 0 {
+		formattedTriples = sidecarTriples
+	}
 
 	return &RetrieveResult{
-		Triples:               formatTriples(s.graph, triples),
+		Triples:               formattedTriples,
 		ChunkIDs:              chunkIDs,
 		ChunkContents:         chunkContents,
 		ChunkRetrievalResults: chunkRetrievalResults,
@@ -88,6 +95,7 @@ func (s *Service) Retrieve(ctx context.Context, req RetrieveRequest) (*RetrieveR
 			{Name: "keyword_node_search", Count: len(keywordNodes)},
 			{Name: "one_hop_triples", Count: len(triples)},
 			{Name: "sidecar_chunk_faiss", Count: len(chunkRetrievalResults), Meta: sidecarMeta(s.sidecar != nil, req, sidecarErr)},
+			{Name: "sidecar_triple_faiss", Count: len(sidecarTriples), Meta: sidecarMeta(s.sidecar != nil, req, sidecarTripleErr)},
 			{Name: "chunk_lookup", Count: len(chunkContents)},
 		}},
 	}, nil
@@ -135,6 +143,135 @@ func (s *Service) retrieveChunksViaSidecar(ctx context.Context, req RetrieveRequ
 		chunkIDs = append(chunkIDs, hit.ID)
 	}
 	return results, chunkIDs, nil
+}
+
+func (s *Service) retrieveTriplesViaSidecar(ctx context.Context, req RetrieveRequest, topK int) ([]string, []string, error) {
+	if s.sidecar == nil {
+		return nil, nil, nil
+	}
+	dataset := req.Dataset
+	if dataset == "" {
+		dataset = "demo"
+	}
+	embedResp, err := s.sidecar.Embed(ctx, sidecar.EmbedRequest{
+		Texts:     []string{req.Question},
+		Normalize: true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(embedResp.Vectors) == 0 {
+		return nil, nil, fmt.Errorf("sidecar embed returned no vectors")
+	}
+	searchResp, err := s.sidecar.Search(ctx, sidecar.SearchRequest{
+		Dataset:     dataset,
+		Index:       "triple",
+		QueryVector: embedResp.Vectors[0],
+		TopK:        topK,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	results := make([]string, 0, len(searchResp.Hits))
+	chunkIDs := map[string]struct{}{}
+	for _, hit := range searchResp.Hits {
+		formatted, ids, ok := s.formatSidecarTriple(hit)
+		if !ok {
+			continue
+		}
+		results = append(results, formatted)
+		for _, id := range ids {
+			if id != "" {
+				chunkIDs[id] = struct{}{}
+			}
+		}
+	}
+	return results, sortedKeys(chunkIDs), nil
+}
+
+func (s *Service) formatSidecarTriple(hit sidecar.SearchHit) (string, []string, bool) {
+	if hit.Triple != nil {
+		if shouldSkipTripleRelation(hit.Triple.Relation) {
+			return "", nil, false
+		}
+		if hit.Triple.FormattedTriple != "" {
+			ids := hit.Triple.ChunkIDs
+			if len(ids) == 0 {
+				ids = s.chunkIDsFromNodeIDs(hit.Triple.SubjectID, hit.Triple.ObjectID)
+			}
+			return ensureTripleScore(hit.Triple.FormattedTriple, hit.Score), ids, true
+		}
+		if hit.SubjectID == "" {
+			hit.SubjectID = hit.Triple.SubjectID
+		}
+		if hit.Relation == "" {
+			hit.Relation = hit.Triple.Relation
+		}
+		if hit.ObjectID == "" {
+			hit.ObjectID = hit.Triple.ObjectID
+		}
+	}
+	if shouldSkipTripleRelation(hit.Relation) {
+		return "", nil, false
+	}
+	if hit.FormattedTriple != "" {
+		return ensureTripleScore(hit.FormattedTriple, hit.Score), s.chunkIDsFromNodeIDs(hit.SubjectID, hit.ObjectID), true
+	}
+
+	subjectID, relation, objectID := hit.SubjectID, hit.Relation, hit.ObjectID
+	if subjectID == "" || relation == "" || objectID == "" {
+		parsedSubject, parsedRelation, parsedObject, ok := parseTripleItem(hit.Item)
+		if !ok {
+			return "", nil, false
+		}
+		subjectID, relation, objectID = parsedSubject, parsedRelation, parsedObject
+	}
+	if shouldSkipTripleRelation(relation) {
+		return "", nil, false
+	}
+	subject := s.graph.Nodes[subjectID]
+	object := s.graph.Nodes[objectID]
+	if subject == nil || object == nil {
+		return "", nil, false
+	}
+
+	formatted := fmt.Sprintf(
+		"(%s %s, %s, %s %s) [score: %.3f]",
+		nodeTextForTriple(subject),
+		nodePropertiesForTriple(subject),
+		relation,
+		nodeTextForTriple(object),
+		nodePropertiesForTriple(object),
+		hit.Score,
+	)
+	return formatted, s.chunkIDsFromNodeIDs(subjectID, objectID), true
+}
+
+func shouldSkipTripleRelation(relation string) bool {
+	return relation == "represented_by" || relation == "kw_filter_by"
+}
+
+func ensureTripleScore(formatted string, score float64) string {
+	if strings.Contains(formatted, ") [score:") {
+		return formatted
+	}
+	return fmt.Sprintf("%s [score: %.3f]", formatted, score)
+}
+
+func parseTripleItem(raw json.RawMessage) (string, string, string, bool) {
+	if len(raw) == 0 {
+		return "", "", "", false
+	}
+	var parts []string
+	if err := json.Unmarshal(raw, &parts); err == nil && len(parts) >= 3 {
+		return parts[0], parts[1], parts[2], true
+	}
+	var items []any
+	if err := json.Unmarshal(raw, &items); err == nil && len(items) >= 3 {
+		return fmt.Sprintf("%v", items[0]), fmt.Sprintf("%v", items[1]), fmt.Sprintf("%v", items[2]), true
+	}
+	return "", "", "", false
 }
 
 func sidecarMeta(enabled bool, req RetrieveRequest, err error) map[string]any {
@@ -253,14 +390,22 @@ func (s *Service) oneHopTriples(nodeIDs []string) []triple {
 func (s *Service) chunkIDsFromTriples(triples []triple) []string {
 	ids := map[string]struct{}{}
 	for _, tr := range triples {
-		for _, nodeID := range []string{tr.Source, tr.Target} {
-			node := s.graph.Nodes[nodeID]
-			if node == nil {
-				continue
-			}
-			if id, ok := node.Properties["chunk id"].(string); ok && id != "" {
-				ids[id] = struct{}{}
-			}
+		for _, id := range s.chunkIDsFromNodeIDs(tr.Source, tr.Target) {
+			ids[id] = struct{}{}
+		}
+	}
+	return sortedKeys(ids)
+}
+
+func (s *Service) chunkIDsFromNodeIDs(nodeIDs ...string) []string {
+	ids := map[string]struct{}{}
+	for _, nodeID := range nodeIDs {
+		node := s.graph.Nodes[nodeID]
+		if node == nil {
+			continue
+		}
+		if id, ok := node.Properties["chunk id"].(string); ok && id != "" {
+			ids[id] = struct{}{}
 		}
 	}
 	return sortedKeys(ids)
@@ -295,6 +440,53 @@ func formatChunkResult(chunkID, content string, score float64) string {
 		content = content[:200]
 	}
 	return fmt.Sprintf("[Chunk %s] %s... [score: %.3f]", chunkID, content, score)
+}
+
+func nodeTextForTriple(node *dataset.Node) string {
+	if node == nil {
+		return ""
+	}
+	name := node.NodeName()
+	description := node.NodeDescription()
+	result := strings.TrimSpace(strings.TrimSpace(name) + " " + strings.TrimSpace(description))
+	if result == "" {
+		return "[Node: " + node.ID + "]"
+	}
+	return result
+}
+
+func nodePropertiesForTriple(node *dataset.Node) string {
+	if node == nil {
+		return ""
+	}
+	skip := map[string]struct{}{
+		"name": {}, "description": {}, "properties": {}, "label": {}, "chunk id": {}, "level": {},
+	}
+	var props []string
+	for key, value := range node.Properties {
+		if _, ok := skip[key]; ok {
+			continue
+		}
+		props = append(props, fmt.Sprintf("%s: %s", key, propertyValueString(value)))
+	}
+	sort.Strings(props)
+	if len(props) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(props, ", ") + "]"
+}
+
+func propertyValueString(value any) string {
+	switch v := value.(type) {
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			parts = append(parts, fmt.Sprintf("%v", item))
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return fmt.Sprintf("%v", value)
+	}
 }
 
 func sortedKeys(m map[string]struct{}) []string {
