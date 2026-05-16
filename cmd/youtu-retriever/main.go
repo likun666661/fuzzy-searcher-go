@@ -26,6 +26,7 @@ func main() {
 	datasetName := flag.String("dataset", "demo", "Dataset name for sidecar requests")
 	involvedTypesPath := flag.String("involved-types", "", "Optional involved_types JSON file")
 	sidecarURL := flag.String("sidecar-url", "", "Optional Python sidecar base URL")
+	tripleTracePath := flag.String("triple-trace", "", "Optional Python triple-trace/v1 JSON path")
 	pretty := flag.Bool("pretty", true, "Pretty-print JSON output")
 	flag.CommandLine.Parse(args)
 
@@ -54,6 +55,12 @@ func main() {
 			fatal(err)
 		}
 	}
+	if *tripleTracePath != "" {
+		req.TripleTrace, err = loadTripleTrace(*tripleTracePath)
+		if err != nil {
+			fatal(err)
+		}
+	}
 
 	opts := []retrieval.Option{}
 	if *sidecarURL != "" {
@@ -75,6 +82,21 @@ func main() {
 		fatal(err)
 	}
 	fmt.Println(string(out))
+}
+
+func loadTripleTrace(path string) (*retrieval.TripleTrace, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read triple trace: %w", err)
+	}
+	var trace retrieval.TripleTrace
+	if err := json.Unmarshal(data, &trace); err != nil {
+		return nil, fmt.Errorf("parse triple trace: %w", err)
+	}
+	if trace.SchemaVersion != "triple-trace/v1" {
+		return nil, fmt.Errorf("unsupported triple trace schema: %q", trace.SchemaVersion)
+	}
+	return &trace, nil
 }
 
 func loadInvolvedTypes(path string) (retrieval.InvolvedTypes, error) {

@@ -233,3 +233,56 @@ func TestRetrieveWithSidecarTripleResults(t *testing.T) {
 		t.Fatalf("chunk ids = %#v", result.ChunkIDs)
 	}
 }
+
+func TestRetrieveWithTripleTrace(t *testing.T) {
+	graph := &dataset.Graph{
+		Nodes: map[string]*dataset.Node{
+			"n1": {
+				ID: "n1",
+				Properties: map[string]any{
+					"name":     "Fallback",
+					"chunk id": "c1",
+				},
+			},
+		},
+	}
+	chunkStore := &chunks.Store{ByID: map[string]string{
+		"c1": "fallback chunk",
+	}}
+	trace := &retrieval.TripleTrace{
+		SchemaVersion: "triple-trace/v1",
+		Dataset:       "demo",
+		Records: []retrieval.TripleTraceRecord{
+			{
+				ID:       "qa_1",
+				Question: "question",
+				Retrieval: retrieval.TripleTraceResult{
+					Triples:  []string{"(Python authority, relation, output) [score: 0.900]"},
+					ChunkIDs: []string{"c1"},
+					ChunkContentsByID: map[string]string{
+						"c1": "python chunk",
+					},
+					ChunkRetrievalResults: []string{"[Chunk c1] python chunk... [score: 0.800]"},
+				},
+			},
+		},
+	}
+
+	result, err := retrieval.NewService(graph, chunkStore).Retrieve(context.Background(), retrieval.RetrieveRequest{
+		Question:    "question",
+		TopK:        20,
+		TripleTrace: trace,
+	})
+	if err != nil {
+		t.Fatalf("Retrieve: %v", err)
+	}
+	if got := result.Triples; len(got) != 1 || got[0] != "(Python authority, relation, output) [score: 0.900]" {
+		t.Fatalf("triples = %#v", got)
+	}
+	if got := result.ChunkContents; len(got) != 1 || got[0] != "python chunk" {
+		t.Fatalf("chunk contents = %#v", got)
+	}
+	if len(result.Debug.Strategies) != 1 || result.Debug.Strategies[0].Name != "python_triple_trace" {
+		t.Fatalf("debug strategies = %#v", result.Debug.Strategies)
+	}
+}

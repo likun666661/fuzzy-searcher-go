@@ -50,6 +50,11 @@ func (s *Service) Retrieve(ctx context.Context, req RetrieveRequest) (*RetrieveR
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if req.TripleTrace != nil {
+		if result := s.retrieveFromTripleTrace(req); result != nil {
+			return result, nil
+		}
+	}
 
 	topK := req.TopK
 	if topK <= 0 {
@@ -99,6 +104,56 @@ func (s *Service) Retrieve(ctx context.Context, req RetrieveRequest) (*RetrieveR
 			{Name: "chunk_lookup", Count: len(chunkContents)},
 		}},
 	}, nil
+}
+
+func (s *Service) retrieveFromTripleTrace(req RetrieveRequest) *RetrieveResult {
+	record := selectTripleTraceRecord(req.TripleTrace, req.Question)
+	if record == nil {
+		return nil
+	}
+	chunkIDs := append([]string(nil), record.Retrieval.ChunkIDs...)
+	chunkContents := make([]string, 0, len(chunkIDs))
+	for _, id := range chunkIDs {
+		if content, ok := record.Retrieval.ChunkContentsByID[id]; ok {
+			chunkContents = append(chunkContents, content)
+			continue
+		}
+		if content, ok := s.chunks.Get(id); ok {
+			chunkContents = append(chunkContents, content)
+		}
+	}
+	return &RetrieveResult{
+		Triples:               append([]string(nil), record.Retrieval.Triples...),
+		ChunkIDs:              chunkIDs,
+		ChunkContents:         chunkContents,
+		ChunkRetrievalResults: append([]string(nil), record.Retrieval.ChunkRetrievalResults...),
+		Debug: RetrieveDebug{Strategies: []StrategyDebug{
+			{
+				Name:  "python_triple_trace",
+				Count: len(record.Retrieval.Triples),
+				Meta: map[string]any{
+					"schema_version": req.TripleTrace.SchemaVersion,
+					"record_id":      record.ID,
+					"dataset":        req.TripleTrace.Dataset,
+				},
+			},
+		}},
+	}
+}
+
+func selectTripleTraceRecord(trace *TripleTrace, question string) *TripleTraceRecord {
+	if trace == nil || len(trace.Records) == 0 {
+		return nil
+	}
+	for i := range trace.Records {
+		if trace.Records[i].Question == question {
+			return &trace.Records[i]
+		}
+	}
+	if len(trace.Records) == 1 {
+		return &trace.Records[0]
+	}
+	return nil
 }
 
 func (s *Service) retrieveChunksViaSidecar(ctx context.Context, req RetrieveRequest, topK int) ([]string, []string, error) {
