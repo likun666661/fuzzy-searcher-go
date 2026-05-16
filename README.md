@@ -108,6 +108,24 @@ go run ./cmd/youtu-retriever retrieve \
   --sidecar-path2-triples
 ```
 
+For Phase 8 rerank-only parity, Go asks the path1 primitive for raw one-hop
+candidates, sends those candidates to the rerank-only primitive, and still
+merges locally with path2. This keeps Go from consuming path1's pre-reranked
+authority output directly:
+
+```bash
+go run ./cmd/youtu-retriever retrieve \
+  --graph ../youtu-graphrag/output/graphs/demo_new.json \
+  --chunks ../youtu-graphrag/output/chunks/demo.txt \
+  --dataset demo \
+  --question "When was the person who Messi's goals in Copa del Rey compared to get signed by Barcelona?" \
+  --top-k 20 \
+  --sidecar-url http://127.0.0.1:8765 \
+  --sidecar-path1-triples \
+  --sidecar-rerank-triples \
+  --sidecar-path2-triples
+```
+
 It outputs a bare `RetrieveResult` JSON object:
 
 ```json
@@ -149,7 +167,7 @@ python3 scripts/retrieval_regression_report.py \
   --record-id qa_1
 ```
 
-Current Phase 7 expected status with `--sidecar-path1-triples
---sidecar-path2-triples`: `loader`, `chunk`, `triple`, and `full` all pass
-against `demo.json`; the debug strategy should be
-`path1_path2_primitive_merge`.
+Current Phase 8 expected status with `--sidecar-path1-triples
+--sidecar-rerank-triples --sidecar-path2-triples`: `loader`, `chunk`,
+`triple`, and `full` all pass against `demo.json`; the debug strategy should be
+`path1_rerank_path2_primitive_merge`.

@@ -75,6 +75,14 @@ type Path1TriplesRequest struct {
 	IncludeRaw    bool          `json:"include_raw,omitempty"`
 }
 
+// RerankTriplesRequest is POST /v1/retrieval/rerank-triples input.
+type RerankTriplesRequest struct {
+	Dataset  string          `json:"dataset"`
+	Question string          `json:"question"`
+	TopK     int             `json:"top_k"`
+	Triples  json.RawMessage `json:"triples"`
+}
+
 // InvolvedTypes mirrors the retriever request shape without importing retrieval.
 type InvolvedTypes struct {
 	Nodes      []string `json:"nodes,omitempty"`
@@ -149,6 +157,11 @@ func (c *Client) Path2Triples(ctx context.Context, req Path2TriplesRequest, out 
 // Path1Triples requests Python-authoritative path1 one-hop rerank output.
 func (c *Client) Path1Triples(ctx context.Context, req Path1TriplesRequest, out any) error {
 	return c.post(ctx, "/v1/retrieval/path1-triples", req, out)
+}
+
+// RerankTriples requests Python-authoritative scoring for caller-provided triples.
+func (c *Client) RerankTriples(ctx context.Context, req RerankTriplesRequest, out any) error {
+	return c.post(ctx, "/v1/retrieval/rerank-triples", req, out)
 }
 
 func (c *Client) post(ctx context.Context, path string, in any, out any) error {

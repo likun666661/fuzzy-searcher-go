@@ -132,3 +132,45 @@ func TestPath1Triples(t *testing.T) {
 		t.Fatalf("out = %#v", out)
 	}
 }
+
+func TestRerankTriples(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/retrieval/rerank-triples" {
+			http.NotFound(w, r)
+			return
+		}
+		var req sidecar.RerankTriplesRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Dataset != "demo" || req.Question != "question" || req.TopK != 20 || len(req.Triples) == 0 {
+			t.Fatalf("request = %#v", req)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"schema_version": "rerank-triples/v1",
+			"dataset":        req.Dataset,
+			"reranked_triples": []map[string]any{
+				{"rank": 1, "key": "h\tr\tt", "formatted_triple": "(h, r, t) [score: 0.700]"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	var out struct {
+		SchemaVersion string `json:"schema_version"`
+		Dataset       string `json:"dataset"`
+	}
+	err := sidecar.NewClient(server.URL).RerankTriples(context.Background(), sidecar.RerankTriplesRequest{
+		Dataset:  "demo",
+		Question: "question",
+		TopK:     20,
+		Triples:  json.RawMessage(`[{"head_id":"h","relation":"r","tail_id":"t"}]`),
+	}, &out)
+	if err != nil {
+		t.Fatalf("RerankTriples: %v", err)
+	}
+	if out.SchemaVersion != "rerank-triples/v1" || out.Dataset != "demo" {
+		t.Fatalf("out = %#v", out)
+	}
+}

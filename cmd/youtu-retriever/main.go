@@ -30,6 +30,7 @@ func main() {
 	sidecarTripleTrace := flag.Bool("sidecar-triple-trace", false, "Fetch Python triple-trace/v1 from --sidecar-url")
 	sidecarPath1Triples := flag.Bool("sidecar-path1-triples", false, "Fetch Python path1-triples/v1 from --sidecar-url and merge locally")
 	sidecarPath2Triples := flag.Bool("sidecar-path2-triples", false, "Fetch Python path2-triples/v1 from --sidecar-url and merge locally")
+	sidecarRerankTriples := flag.Bool("sidecar-rerank-triples", false, "Rerank path1 raw triples through Python rerank-triples/v1 before merging")
 	path2Threshold := flag.Float64("path2-threshold", 0.1, "Threshold for --sidecar-path2-triples")
 	pretty := flag.Bool("pretty", true, "Pretty-print JSON output")
 	flag.CommandLine.Parse(args)
@@ -94,7 +95,22 @@ func main() {
 		if client == nil {
 			fatal(fmt.Errorf("--sidecar-path1-triples requires --sidecar-url"))
 		}
-		req.Path1Triples, err = fetchPath1Triples(context.Background(), client, req)
+		req.Path1Triples, err = fetchPath1Triples(context.Background(), client, req, *sidecarRerankTriples)
+		if err != nil {
+			fatal(err)
+		}
+	}
+	if *sidecarRerankTriples {
+		if client == nil {
+			fatal(fmt.Errorf("--sidecar-rerank-triples requires --sidecar-url"))
+		}
+		if req.Path1Triples == nil || !*sidecarPath1Triples {
+			fatal(fmt.Errorf("--sidecar-rerank-triples requires --sidecar-path1-triples"))
+		}
+		if req.Path2Triples == nil || !*sidecarPath2Triples {
+			fatal(fmt.Errorf("--sidecar-rerank-triples requires --sidecar-path2-triples"))
+		}
+		req.RerankTriples, err = fetchRerankTriples(context.Background(), client, req)
 		if err != nil {
 			fatal(err)
 		}
@@ -122,13 +138,37 @@ func main() {
 	fmt.Println(string(out))
 }
 
-func fetchPath1Triples(ctx context.Context, client *sidecar.Client, req retrieval.RetrieveRequest) (*retrieval.Path1Triples, error) {
+func fetchRerankTriples(ctx context.Context, client *sidecar.Client, req retrieval.RetrieveRequest) (*retrieval.RerankTriples, error) {
+	if req.Path1Triples == nil || len(req.Path1Triples.RawOneHopTriples) == 0 {
+		return nil, fmt.Errorf("rerank triples requires path1 raw one-hop triples")
+	}
+	rawTriples, err := json.Marshal(req.Path1Triples.RawOneHopTriples)
+	if err != nil {
+		return nil, fmt.Errorf("marshal rerank triples input: %w", err)
+	}
+	var rerank retrieval.RerankTriples
+	err = client.RerankTriples(ctx, sidecar.RerankTriplesRequest{
+		Dataset:  req.Dataset,
+		Question: req.Question,
+		TopK:     req.TopK,
+		Triples:  rawTriples,
+	}, &rerank)
+	if err != nil {
+		return nil, fmt.Errorf("fetch reranked triples: %w", err)
+	}
+	if rerank.SchemaVersion != "rerank-triples/v1" {
+		return nil, fmt.Errorf("unsupported rerank triples schema: %q", rerank.SchemaVersion)
+	}
+	return &rerank, nil
+}
+
+func fetchPath1Triples(ctx context.Context, client *sidecar.Client, req retrieval.RetrieveRequest, includeRaw bool) (*retrieval.Path1Triples, error) {
 	var path1 retrieval.Path1Triples
 	err := client.Path1Triples(ctx, sidecar.Path1TriplesRequest{
 		Dataset:    req.Dataset,
 		Question:   req.Question,
 		TopK:       req.TopK,
-		IncludeRaw: false,
+		IncludeRaw: includeRaw,
 		InvolvedTypes: sidecar.InvolvedTypes{
 			Nodes:      req.InvolvedTypes.Nodes,
 			Relations:  req.InvolvedTypes.Relations,

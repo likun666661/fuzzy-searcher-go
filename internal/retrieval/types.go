@@ -9,13 +9,14 @@ type InvolvedTypes struct {
 
 // RetrieveRequest is the stable Go-side retrieval contract.
 type RetrieveRequest struct {
-	Question      string        `json:"question"`
-	TopK          int           `json:"top_k,omitempty"`
-	InvolvedTypes InvolvedTypes `json:"involved_types,omitempty"`
-	Dataset       string        `json:"dataset,omitempty"`
-	TripleTrace   *TripleTrace  `json:"-"`
-	Path1Triples  *Path1Triples `json:"-"`
-	Path2Triples  *Path2Triples `json:"-"`
+	Question      string         `json:"question"`
+	TopK          int            `json:"top_k,omitempty"`
+	InvolvedTypes InvolvedTypes  `json:"involved_types,omitempty"`
+	Dataset       string         `json:"dataset,omitempty"`
+	TripleTrace   *TripleTrace   `json:"-"`
+	Path1Triples  *Path1Triples  `json:"-"`
+	Path2Triples  *Path2Triples  `json:"-"`
+	RerankTriples *RerankTriples `json:"-"`
 }
 
 // RetrieveResult is the JSON contract consumed by harnesses and backend glue.
@@ -88,6 +89,23 @@ type Path1Triples struct {
 	RawOneHopTriplesCount int           `json:"raw_one_hop_triples_count,omitempty"`
 	RawOneHopTriples      []TraceTriple `json:"raw_one_hop_triples,omitempty"`
 	RerankedTriples       []TraceTriple `json:"reranked_triples"`
+}
+
+// RerankTriples is the Python-authoritative rerank-only primitive emitted by Phase 8A.
+type RerankTriples struct {
+	SchemaVersion   string        `json:"schema_version"`
+	Dataset         string        `json:"dataset"`
+	Question        string        `json:"question"`
+	TopK            int           `json:"top_k"`
+	InputCount      int           `json:"input_count,omitempty"`
+	Stats           RerankStats   `json:"stats,omitempty"`
+	RerankedTriples []TraceTriple `json:"reranked_triples"`
+}
+
+// RerankStats mirrors the sidecar's optional rerank-only summary.
+type RerankStats struct {
+	InputTriples    int `json:"input_triples,omitempty"`
+	RerankedTriples int `json:"reranked_triples,omitempty"`
 }
 
 // TraceTriple is one Python-authoritative triple trace item.
