@@ -19,6 +19,7 @@ DEFAULT_IGNORES = {
     "result.debug.timings_ms",
 }
 
+COMPARE_MODES = ("loader", "chunk", "triple", "full")
 REQUIRED_FIXTURE_TOP_LEVEL = ("version", "case_id", "request", "result")
 REQUIRED_RETRIEVER_GOLDEN_TOP_LEVEL = ("schema_version", "records")
 REQUIRED_REQUEST = ("question", "top_k")
@@ -316,6 +317,45 @@ def parse_triple_string(value: str) -> dict[str, str] | None:
     }
 
 
+def result_for_mode(target: Any, mode: str) -> Any:
+    if not isinstance(target, dict) or not isinstance(target.get("result"), dict):
+        return target
+
+    result = target["result"]
+    if mode == "full":
+        return target
+
+    projected: dict[str, Any] = {}
+    if mode == "loader":
+        projected.update(loader_projection(result))
+    elif mode == "chunk":
+        projected["chunk_ids"] = result.get("chunk_ids", [])
+        projected["chunk_contents"] = result.get("chunk_contents", [])
+        projected["chunk_retrieval_results"] = result.get("chunk_retrieval_results", [])
+    elif mode == "triple":
+        projected["triples"] = result.get("triples", [])
+    else:
+        raise ValueError(f"unknown compare mode: {mode}")
+
+    return {"result": projected}
+
+
+def loader_projection(result: dict[str, Any]) -> dict[str, Any]:
+    chunk_ids = [str(item) for item in result.get("chunk_ids", [])]
+    chunk_contents = result.get("chunk_contents", [])
+    contents_by_id = {
+        chunk_id: chunk_contents[index]
+        for index, chunk_id in enumerate(chunk_ids)
+        if index < len(chunk_contents)
+    }
+    return {
+        "chunk_ids": sorted(chunk_ids),
+        "chunk_contents_by_id": {
+            chunk_id: contents_by_id.get(chunk_id, "") for chunk_id in sorted(chunk_ids)
+        },
+    }
+
+
 def compare(
     golden: Any,
     actual: Any,
@@ -421,6 +461,15 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="record id to compare when using retriever-golden/v1 fixtures",
     )
+    parser.add_argument(
+        "--mode",
+        choices=COMPARE_MODES,
+        default="full",
+        help=(
+            "comparison layer: loader checks chunk ids/content, chunk also checks "
+            "chunk retrieval results, triple checks triples only, full checks all fields"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -439,8 +488,8 @@ def main() -> int:
     ignored.update(args.ignore_path)
 
     diff = compare(
-        normalize(golden_target),
-        normalize(actual_target),
+        result_for_mode(normalize(golden_target), args.mode),
+        result_for_mode(normalize(actual_target), args.mode),
         float_tolerance=args.float_tolerance,
         ignored=ignored,
         strict_extra_fields=args.strict_extra_fields,
@@ -452,7 +501,7 @@ def main() -> int:
             print(f"- {item}", file=sys.stderr)
         return 1
 
-    print(f"retrieval golden matched: {args.actual}")
+    print(f"retrieval golden matched ({args.mode}): {args.actual}")
     return 0
 
 

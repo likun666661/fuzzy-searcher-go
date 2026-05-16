@@ -111,11 +111,51 @@ Compare:
 python3 scripts/compare_retrieval_golden.py \
   --golden ../youtu-graphrag/output/retrieval_golden/demo.json \
   --actual /tmp/go_retrieval_actual.json \
-  --record-id demo_messi_barcelona_001
+  --record-id demo_messi_barcelona_001 \
+  --mode full
 ```
 
 The script exits `0` on parity and non-zero with a path-oriented diff on
 mismatch.
+
+## Phase 2 Modes
+
+The harness supports layered compare modes so sidecar integration can be
+accepted incrementally:
+
+- `loader`: compares chunk id coverage and chunk contents by id, ignoring order.
+  This guards graph/chunk loading and basic chunk id extraction.
+- `chunk`: compares ordered chunk ids, ordered chunk contents, and
+  `chunk_retrieval_results`. This is the first Phase 2B sidecar gate.
+- `triple`: compares only triples after normalizing Python and Go triple string
+  formats.
+- `full`: compares the full normalized retrieval result.
+
+Recommended Phase 2 command sequence:
+
+```bash
+python3 scripts/compare_retrieval_golden.py \
+  --golden ../youtu-graphrag/output/retrieval_golden/demo.json \
+  --actual /tmp/go_retrieval_actual.json \
+  --record-id qa_1 \
+  --mode loader
+
+python3 scripts/compare_retrieval_golden.py \
+  --golden ../youtu-graphrag/output/retrieval_golden/demo.json \
+  --actual /tmp/go_retrieval_actual.json \
+  --record-id qa_1 \
+  --mode chunk
+
+python3 scripts/compare_retrieval_golden.py \
+  --golden ../youtu-graphrag/output/retrieval_golden/demo.json \
+  --actual /tmp/go_retrieval_actual.json \
+  --record-id qa_1 \
+  --mode triple
+```
+
+For Phase 2B, `loader` should remain green and `chunk` should become green
+after the Go retriever consumes sidecar chunk FAISS results. `triple` and
+`full` are expected to remain red until vector/triple rerank work lands.
 
 ## CI Gate
 
