@@ -38,6 +38,9 @@ testdata/                     Phase 1 oracle fixtures
 For a plain-language architecture walkthrough, read
 `docs/architecture_overview.md`.
 
+For the next service-oriented Youtu-RAG roadmap, read
+`docs/youtu_rag_service_plan.md`.
+
 ## Test
 
 ```bash
