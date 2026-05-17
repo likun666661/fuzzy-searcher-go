@@ -39,7 +39,9 @@ For a plain-language architecture walkthrough, read
 `docs/architecture_overview.md`.
 
 For the next service-oriented Youtu-RAG roadmap, read
-`docs/youtu_rag_service_plan.md`. For the service testing track, read
+`docs/youtu_rag_service_plan.md`. For the latest gap map against the original
+Python repo and the workflow orchestration plan, read
+`docs/youtu_rag_gap_map.md`. For the service testing track, read
 `docs/service_test_strategy.md`.
 
 ## Test
@@ -340,3 +342,5 @@ contracts are documented in `docs/contracts/generate_golden_worker.md`,
 `docs/contracts/build_graph_worker.md`, and
 `docs/contracts/answer_worker.md`. The Phase 9 Go-native path1 raw candidate
 parity contract is documented in `docs/contracts/path1_candidate_generation.md`.
+The Phase 14 workflow contract is documented in
+`docs/contracts/workflows.md`.
