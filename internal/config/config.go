@@ -29,6 +29,7 @@ type Config struct {
 	CacheRoot      string
 	GoldenRoot     string
 	TraceRoot      string
+	JobRoot        string
 	DatasetNames   []string
 	Path2Threshold float64
 	ShutdownGrace  time.Duration
@@ -56,6 +57,7 @@ func Load() Config {
 		CacheRoot:      getenv("YOUTU_RAG_CACHE_ROOT", filepath.Join(artifactRoot, "retriever", "faiss_cache_new")),
 		GoldenRoot:     getenv("YOUTU_RAG_GOLDEN_ROOT", filepath.Join(artifactRoot, "output", "retrieval_golden")),
 		TraceRoot:      getenv("YOUTU_RAG_TRACE_ROOT", filepath.Join(artifactRoot, "output", "retrieval_traces")),
+		JobRoot:        getenv("YOUTU_RAG_JOB_ROOT", filepath.Join(artifactRoot, "output", "jobs")),
 		DatasetNames:   getenvList("YOUTU_RAG_DATASETS", []string{defaultDataset}),
 		Path2Threshold: getenvFloat("YOUTU_RAG_PATH2_THRESHOLD", 0.1),
 		ShutdownGrace:  time.Duration(getenvInt("YOUTU_RAG_SHUTDOWN_SECONDS", 10)) * time.Second,

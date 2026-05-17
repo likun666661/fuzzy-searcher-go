@@ -92,8 +92,10 @@ curl -s http://127.0.0.1:8080/v1/retrieve \
 ```
 
 For longer-running workflows, submit the same retrieve request as an async job.
-The first skeleton is process-local and in-memory; it is meant to lock the
-service contract before adding durable queues or external workers:
+The first skeleton is process-local, with JSON job records persisted under
+`YOUTU_RAG_JOB_ROOT` (default: `$YOUTU_RAG_ARTIFACT_ROOT/output/jobs`). It is
+meant to lock the service contract before adding durable queues or external
+workers:
 
 ```bash
 curl -s http://127.0.0.1:8080/v1/jobs \

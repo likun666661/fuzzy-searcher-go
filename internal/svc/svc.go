@@ -29,7 +29,7 @@ func NewService(config config.Config) *Service {
 	return &Service{
 		config:    config,
 		retriever: orchestrator.NewRetriever(config),
-		jobs:      jobs.NewManager(),
+		jobs:      jobs.NewManager(jobs.WithFileStore(config.JobRoot)),
 	}
 }
 

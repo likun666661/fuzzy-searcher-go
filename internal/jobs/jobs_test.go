@@ -67,6 +67,32 @@ func TestManagerCancel(t *testing.T) {
 	}
 }
 
+func TestManagerFileStoreReloadsCompletedJobs(t *testing.T) {
+	dir := t.TempDir()
+	manager := jobs.NewManager(jobs.WithFileStore(dir))
+	job := manager.Submit("test", func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+		recorder.Event("step", "persist me")
+		return map[string]string{"answer": "ok"}, nil
+	})
+	job = waitForStatus(t, manager, job.ID, jobs.StatusSucceeded)
+
+	reloaded := jobs.NewManager(jobs.WithFileStore(dir))
+	loaded, err := reloaded.Get(job.ID)
+	if err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if loaded.Status != jobs.StatusSucceeded || loaded.Result == nil {
+		t.Fatalf("loaded job = %#v", loaded)
+	}
+	events, err := reloaded.Events(job.ID)
+	if err != nil {
+		t.Fatalf("load events: %v", err)
+	}
+	if len(events) < 4 || events[len(events)-1].Type != "succeeded" {
+		t.Fatalf("loaded events = %#v", events)
+	}
+}
+
 func TestManagerUnknownJob(t *testing.T) {
 	manager := jobs.NewManager()
 	if _, err := manager.Get("missing"); !errors.Is(err, jobs.ErrNotFound) {

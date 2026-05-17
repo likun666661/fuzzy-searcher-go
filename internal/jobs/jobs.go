@@ -2,8 +2,11 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,6 +55,7 @@ type Manager struct {
 	mu      sync.Mutex
 	seq     atomic.Uint64
 	entries map[string]*entry
+	store   store
 }
 
 type entry struct {
@@ -66,9 +70,27 @@ type Recorder struct {
 	jobID   string
 }
 
+// Option customizes a Manager.
+type Option func(*Manager)
+
 // NewManager constructs an empty in-memory manager.
-func NewManager() *Manager {
-	return &Manager{entries: map[string]*entry{}}
+func NewManager(opts ...Option) *Manager {
+	manager := &Manager{entries: map[string]*entry{}}
+	for _, opt := range opts {
+		opt(manager)
+	}
+	return manager
+}
+
+// WithFileStore persists job snapshots as JSON files under dir.
+func WithFileStore(dir string) Option {
+	return func(manager *Manager) {
+		if dir == "" {
+			return
+		}
+		manager.store = fileStore{dir: dir}
+		manager.loadStoredJobs()
+	}
 }
 
 // Submit registers and starts one job. Jobs use a background context so they
@@ -95,6 +117,7 @@ func (m *Manager) Submit(jobType string, runner Runner) Job {
 
 	m.mu.Lock()
 	m.entries[id] = ent
+	m.persistLocked(ent)
 	m.mu.Unlock()
 
 	go m.run(ctx, id, runner)
@@ -148,6 +171,7 @@ func (m *Manager) Cancel(id string) (Job, bool, error) {
 		Status:  ent.job.Status,
 	})
 	job := cloneJob(ent.job)
+	m.persistLocked(ent)
 	m.mu.Unlock()
 
 	cancel()
@@ -171,6 +195,7 @@ func (m *Manager) run(ctx context.Context, id string, runner Runner) {
 		Message: "job started",
 		Status:  StatusRunning,
 	})
+	m.persistLocked(ent)
 	m.mu.Unlock()
 
 	result, err := runner(ctx, &Recorder{manager: m, jobID: id})
@@ -208,6 +233,7 @@ func (m *Manager) run(ctx context.Context, id string, runner Runner) {
 			Status:  StatusSucceeded,
 		})
 	}
+	m.persistLocked(ent)
 }
 
 func (m *Manager) addEvent(id string, eventType, message string, status Status) {
@@ -225,6 +251,54 @@ func (m *Manager) addEvent(id string, eventType, message string, status Status) 
 		Type:    eventType,
 		Message: message,
 		Status:  status,
+	})
+	m.persistLocked(ent)
+}
+
+func (m *Manager) loadStoredJobs() {
+	if m.store == nil {
+		return
+	}
+	records, err := m.store.Load()
+	if err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	for _, record := range records {
+		if record.Job.ID == "" {
+			continue
+		}
+		job := record.Job
+		events := append([]Event(nil), record.Events...)
+		if !isTerminal(job.Status) {
+			job.Status = StatusFailed
+			job.Error = "job interrupted by service restart"
+			job.FinishedAt = timePtr(now)
+			events = append(events, Event{
+				Time:    now,
+				Type:    "interrupted",
+				Message: job.Error,
+				Status:  StatusFailed,
+			})
+		}
+		m.entries[job.ID] = &entry{
+			job:    job,
+			events: events,
+			cancel: func() {},
+		}
+		m.persistLocked(m.entries[job.ID])
+	}
+}
+
+func (m *Manager) persistLocked(ent *entry) {
+	if m.store == nil || ent == nil {
+		return
+	}
+	events := make([]Event, len(ent.events))
+	copy(events, ent.events)
+	_ = m.store.Save(record{
+		Job:    cloneJob(ent.job),
+		Events: events,
 	})
 }
 
@@ -253,4 +327,58 @@ func cloneTime(value *time.Time) *time.Time {
 
 func timePtr(value time.Time) *time.Time {
 	return &value
+}
+
+type record struct {
+	Job    Job     `json:"job"`
+	Events []Event `json:"events"`
+}
+
+type store interface {
+	Load() ([]record, error)
+	Save(record) error
+}
+
+type fileStore struct {
+	dir string
+}
+
+func (s fileStore) Load() ([]record, error) {
+	matches, err := filepath.Glob(filepath.Join(s.dir, "*.json"))
+	if err != nil {
+		return nil, err
+	}
+	records := make([]record, 0, len(matches))
+	for _, path := range matches {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		var rec record
+		if err := json.Unmarshal(body, &rec); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	return records, nil
+}
+
+func (s fileStore) Save(rec record) error {
+	if rec.Job.ID == "" {
+		return nil
+	}
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(s.dir, rec.Job.ID+".json")
+	tmp := path + ".tmp"
+	body, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return err
+	}
+	body = append(body, '\n')
+	if err := os.WriteFile(tmp, body, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

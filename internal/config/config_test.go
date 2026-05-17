@@ -18,6 +18,7 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	t.Setenv("YOUTU_RAG_ARTIFACT_ROOT", "/tmp/youtu")
 	t.Setenv("YOUTU_RAG_SIDECAR_URL", "http://127.0.0.1:8765")
 	t.Setenv("YOUTU_RAG_MODE", "native-path1-rerank")
+	t.Setenv("YOUTU_RAG_JOB_ROOT", "/tmp/youtu-jobs")
 	t.Setenv("YOUTU_RAG_DATASETS", " demo, news ,, legal ")
 	t.Setenv("YOUTU_RAG_PATH2_THRESHOLD", "0.25")
 	t.Setenv("YOUTU_RAG_SHUTDOWN_SECONDS", "3")
@@ -43,6 +44,9 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	}
 	if cfg.GraphRoot != filepath.Join("/tmp/youtu", "output", "graphs") {
 		t.Fatalf("graph root = %q", cfg.GraphRoot)
+	}
+	if cfg.JobRoot != "/tmp/youtu-jobs" {
+		t.Fatalf("job root = %q", cfg.JobRoot)
 	}
 }
 
