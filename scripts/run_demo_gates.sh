@@ -15,6 +15,29 @@ MODES="${MODES:-runtime-trace primitive-merge rerank-merge}"
 
 mkdir -p "$OUT_DIR"
 
+require_file() {
+  label="$1"
+  path="$2"
+  if [ ! -f "$path" ]; then
+    cat >&2 <<EOF
+missing $label: $path
+
+Set explicit paths when running from a clean clone, for example:
+
+  GRAPH=/abs/path/youtu-graphrag/output/graphs/demo_new.json \\
+  CHUNKS=/abs/path/youtu-graphrag/output/chunks/demo.txt \\
+  GOLDEN=/abs/path/youtu-graphrag/output/retrieval_golden/demo.json \\
+  SIDECAR_URL=$SIDECAR_URL \\
+  scripts/run_demo_gates.sh
+EOF
+    exit 2
+  fi
+}
+
+require_file "graph JSON" "$GRAPH"
+require_file "chunks file" "$CHUNKS"
+require_file "golden fixture" "$GOLDEN"
+
 run_mode() {
   mode="$1"
   actual="$OUT_DIR/${mode}.json"

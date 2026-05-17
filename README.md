@@ -47,6 +47,18 @@ If the Python sidecar is running, run the demo parity gates:
 SIDECAR_URL=http://127.0.0.1:8765 scripts/run_demo_gates.sh
 ```
 
+The default demo gate paths assume `fuzzy-searcher-go` and `youtu-graphrag`
+are sibling directories. From a clean clone elsewhere, pass explicit artifact
+paths:
+
+```bash
+GRAPH=/abs/path/youtu-graphrag/output/graphs/demo_new.json \
+CHUNKS=/abs/path/youtu-graphrag/output/chunks/demo.txt \
+GOLDEN=/abs/path/youtu-graphrag/output/retrieval_golden/demo.json \
+SIDECAR_URL=http://127.0.0.1:8765 \
+scripts/run_demo_gates.sh
+```
+
 ## CLI
 
 The CLI accepts either direct flags or a `retrieve` subcommand for compatibility with the migration harness:
