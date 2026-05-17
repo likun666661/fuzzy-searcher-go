@@ -48,6 +48,15 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	if cfg.JobRoot != "/tmp/youtu-jobs" {
 		t.Fatalf("job root = %q", cfg.JobRoot)
 	}
+	if cfg.PythonBin != filepath.Join("/tmp/youtu", ".venv", "bin", "python") {
+		t.Fatalf("python bin = %q", cfg.PythonBin)
+	}
+	if cfg.GoldenScript != filepath.Join("/tmp/youtu", "scripts", "generate_retriever_golden.py") {
+		t.Fatalf("golden script = %q", cfg.GoldenScript)
+	}
+	if cfg.WorkerCWD != "/tmp/youtu" {
+		t.Fatalf("worker cwd = %q", cfg.WorkerCWD)
+	}
 }
 
 func TestLoadFallsBackOnInvalidNumericEnvironment(t *testing.T) {

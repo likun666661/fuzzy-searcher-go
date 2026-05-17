@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/fuzzy-searcher-go/internal/artifacts"
@@ -14,6 +15,7 @@ import (
 	"github.com/fuzzy-searcher-go/internal/jobs"
 	"github.com/fuzzy-searcher-go/internal/orchestrator"
 	"github.com/fuzzy-searcher-go/internal/sidecarstatus"
+	"github.com/fuzzy-searcher-go/internal/workers/golden"
 )
 
 // Service owns HTTP routing and response mapping. Domain orchestration lives in
@@ -174,8 +176,9 @@ func (s *Service) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 }
 
 type createJobRequest struct {
-	Type     string                     `json:"type"`
-	Retrieve orchestrator.RetrieveInput `json:"retrieve,omitempty"`
+	Type           string                     `json:"type"`
+	Retrieve       orchestrator.RetrieveInput `json:"retrieve,omitempty"`
+	GenerateGolden jobs.GenerateGoldenSpec    `json:"generate_golden,omitempty"`
 }
 
 func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
@@ -193,6 +196,28 @@ func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 			result, err := s.retriever.Retrieve(ctx, input.Retrieve)
 			if err == nil {
 				recorder.Event("artifact_result_inline", "retrieve result stored in job result")
+			}
+			return result, err
+		})
+		writeJSON(w, http.StatusAccepted, job)
+	case jobs.TypeGenerateGolden:
+		spec := s.generateGoldenSpec(input.GenerateGolden)
+		artifacts := generateGoldenArtifacts(spec)
+		job := s.jobs.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+			recorder.Event("worker_started", "generate_golden Python worker started")
+			recorder.Artifact("golden_fixture", "running", "")
+			result, err := golden.Run(ctx, golden.Config{
+				PythonBin:  spec.PythonBin,
+				ScriptPath: spec.ScriptPath,
+				WorkingDir: spec.WorkingDir,
+			}, spec)
+			if err == nil {
+				recorder.Artifact("golden_fixture", "written", result.OutputPath)
+				recorder.Event("artifact_golden_written", "golden fixture artifact written")
+			} else if errors.Is(err, golden.ErrMissingOutput) {
+				recorder.Artifact("golden_fixture", "missing", "")
+			} else {
+				recorder.Artifact("golden_fixture", "failed", "")
 			}
 			return result, err
 		})
@@ -251,6 +276,47 @@ func retrieveJobArtifacts(input orchestrator.RetrieveInput) []jobs.Artifact {
 		Description:   "RetrieveResult is returned inline in the job result field.",
 	})
 	return artifacts
+}
+
+func (s *Service) generateGoldenSpec(input jobs.GenerateGoldenSpec) jobs.GenerateGoldenSpec {
+	spec := input
+	if spec.Dataset == "" {
+		spec.Dataset = s.config.DefaultDataset
+	}
+	if spec.Dataset == "" {
+		spec.Dataset = "demo"
+	}
+	if spec.OutputPath == "" {
+		spec.OutputPath = filepath.Join(s.config.GoldenRoot, spec.Dataset+".json")
+	}
+	if spec.Limit <= 0 {
+		spec.Limit = 1
+	}
+	if spec.PythonBin == "" {
+		spec.PythonBin = s.config.PythonBin
+	}
+	if spec.ScriptPath == "" {
+		spec.ScriptPath = s.config.GoldenScript
+	}
+	if spec.WorkingDir == "" {
+		spec.WorkingDir = s.config.WorkerCWD
+	}
+	return spec
+}
+
+func generateGoldenArtifacts(spec jobs.GenerateGoldenSpec) []jobs.Artifact {
+	return []jobs.Artifact{
+		{
+			Name:          "golden_fixture",
+			Role:          "output",
+			Kind:          "retriever_golden_json",
+			SchemaVersion: "retriever-golden/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.OutputPath,
+			Status:        "pending",
+			Description:   "Python retriever golden fixture written by generate_golden worker.",
+		},
+	}
 }
 
 func (s *Service) handleJob(w http.ResponseWriter, r *http.Request) {

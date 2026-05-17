@@ -500,8 +500,144 @@ func TestJobValidation(t *testing.T) {
 	}
 }
 
+func TestGenerateGoldenJobLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	outputPath := filepath.Join(dir, "golden", "demo.json")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import json
+import sys
+dataset = sys.argv[sys.argv.index("--dataset") + 1]
+output = sys.argv[sys.argv.index("--output") + 1]
+with open(output, "w", encoding="utf-8") as f:
+    json.dump({"schema_version": "retriever-golden/v1", "dataset": dataset}, f)
+print(json.dumps({"ok": True, "output": output}))
+`)
+
+	cfg := config.Config{
+		DefaultDataset: "demo",
+		GoldenRoot:     filepath.Join(dir, "golden"),
+		JobRoot:        filepath.Join(dir, "jobs"),
+		PythonBin:      "python3",
+		GoldenScript:   scriptPath,
+		WorkerCWD:      dir,
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"generate_golden","generate_golden":{"dataset":"demo","limit":2,"output_path":` + quote(outputPath) + `}}`)
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	for _, want := range []string{
+		`"type":"generate_golden"`,
+		`"schema_version":"service-job/v1"`,
+		`"name":"golden_fixture"`,
+		`"schema_version":"retriever-golden/v1"`,
+		`"status":"pending"`,
+	} {
+		if !strings.Contains(create.Body.String(), want) {
+			t.Fatalf("create job missing %s: %s", want, create.Body.String())
+		}
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "succeeded")
+	result, ok := job["result"].(map[string]any)
+	if !ok || result["schema_version"] != "generate-golden-result/v1" {
+		t.Fatalf("job result = %#v", job["result"])
+	}
+	if !containsArtifactStatus(job, "golden_fixture", "written") {
+		t.Fatalf("job artifacts not written: %#v", job["artifacts"])
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("golden output missing: %v", err)
+	}
+
+	restarted := svc.NewService(cfg)
+	restartedRoutes := restarted.Routes()
+	loaded := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID, nil))
+	if loaded.Code != http.StatusOK {
+		t.Fatalf("loaded job status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+	if !strings.Contains(loaded.Body.String(), `"status":"succeeded"`) ||
+		!strings.Contains(loaded.Body.String(), `"status":"written"`) {
+		t.Fatalf("loaded job body = %s", loaded.Body.String())
+	}
+}
+
+func TestGenerateGoldenJobFailure(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import sys
+print("golden runtime failed", file=sys.stderr)
+raise SystemExit(5)
+`)
+
+	service := svc.NewService(config.Config{
+		DefaultDataset: "demo",
+		GoldenRoot:     filepath.Join(dir, "golden"),
+		JobRoot:        filepath.Join(dir, "jobs"),
+		PythonBin:      "python3",
+		GoldenScript:   scriptPath,
+		WorkerCWD:      dir,
+	})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"generate_golden","generate_golden":{"dataset":"demo"}}`)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "failed")
+	if errorText, _ := job["error"].(string); !strings.Contains(errorText, "golden runtime failed") {
+		t.Fatalf("job error = %#v", job["error"])
+	}
+	if !containsArtifactStatus(job, "golden_fixture", "failed") {
+		t.Fatalf("job artifacts not failed: %#v", job["artifacts"])
+	}
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"worker_started"`) ||
+		!strings.Contains(events.Body.String(), `"failed"`) {
+		t.Fatalf("events body = %s", events.Body.String())
+	}
+}
+
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+}
+
+func containsArtifactStatus(job map[string]any, name string, status string) bool {
+	artifacts, ok := job["artifacts"].([]any)
+	if !ok {
+		return false
+	}
+	for _, artifact := range artifacts {
+		item, ok := artifact.(map[string]any)
+		if ok && item["name"] == name && item["status"] == status {
+			return true
+		}
+	}
+	return false
 }
 
 func waitForServiceJob(t *testing.T, routes http.Handler, id string, want string) map[string]any {
@@ -586,5 +722,12 @@ func mustMkdir(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func writeExecutable(t *testing.T, path string, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write executable %s: %v", path, err)
 	}
 }

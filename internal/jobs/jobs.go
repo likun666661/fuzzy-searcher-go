@@ -80,6 +80,23 @@ type RetrieveSpec struct {
 	Path2Threshold float64 `json:"path2_threshold,omitempty"`
 }
 
+// GenerateGoldenSpec is the typed job spec for Python retriever golden
+// generation. Go owns orchestration and artifact tracking; Python owns the
+// retriever runtime.
+type GenerateGoldenSpec struct {
+	Dataset          string   `json:"dataset"`
+	OutputPath       string   `json:"output_path"`
+	Limit            int      `json:"limit,omitempty"`
+	Questions        []string `json:"questions,omitempty"`
+	TopK             int      `json:"top_k,omitempty"`
+	InvolvedTypes    string   `json:"involved_types,omitempty"`
+	ConfigPath       string   `json:"config_path,omitempty"`
+	SkipBuildIndices bool     `json:"skip_build_indices,omitempty"`
+	PythonBin        string   `json:"python_bin,omitempty"`
+	ScriptPath       string   `json:"script_path,omitempty"`
+	WorkingDir       string   `json:"working_dir,omitempty"`
+}
+
 // Runner is the unit of work executed by the manager.
 type Runner func(context.Context, *Recorder) (any, error)
 
@@ -226,6 +243,11 @@ func (r *Recorder) Event(eventType, message string) {
 	r.manager.addEvent(r.jobID, eventType, message, "")
 }
 
+// Artifact updates the status/path for one named job artifact.
+func (r *Recorder) Artifact(name, status, path string) {
+	r.manager.updateArtifact(r.jobID, name, status, path)
+}
+
 func (m *Manager) run(ctx context.Context, id string, runner Runner) {
 	started := time.Now().UTC()
 	m.mu.Lock()
@@ -296,6 +318,27 @@ func (m *Manager) addEvent(id string, eventType, message string, status Status) 
 		Status:  status,
 	})
 	m.persistLocked(ent)
+}
+
+func (m *Manager) updateArtifact(id string, name string, status string, path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ent, ok := m.entries[id]
+	if !ok {
+		return
+	}
+	for idx := range ent.job.Artifacts {
+		if ent.job.Artifacts[idx].Name == name {
+			if status != "" {
+				ent.job.Artifacts[idx].Status = status
+			}
+			if path != "" {
+				ent.job.Artifacts[idx].Path = path
+			}
+			m.persistLocked(ent)
+			return
+		}
+	}
 }
 
 func (m *Manager) loadStoredJobs() {
