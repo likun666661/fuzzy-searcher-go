@@ -3,7 +3,7 @@
 Go retriever scaffold for the Youtu-GraphRAG migration.
 
 This repository is an incremental Go migration of the large Python retriever
-core. The current implementation can run in two modes:
+core. The current implementation can run through several migration modes:
 
 - native Go graph/chunk loading with Python vector sidecar support
 - trace-backed parity mode, where Python emits an authoritative
@@ -34,6 +34,9 @@ docs/                         Migration test plan
 docs/contracts/               JSON/schema and sidecar primitive contracts
 testdata/                     Phase 1 oracle fixtures
 ```
+
+For a plain-language architecture walkthrough, read
+`docs/architecture_overview.md`.
 
 ## Test
 
