@@ -2,7 +2,10 @@ package jobs_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -101,6 +104,51 @@ func TestManagerFileStoreReloadsCompletedJobs(t *testing.T) {
 	}
 	if len(events) < 4 || events[len(events)-1].Type != "succeeded" {
 		t.Fatalf("loaded events = %#v", events)
+	}
+}
+
+func TestManagerFileStoreMarksRunningJobsInterruptedOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	record := map[string]any{
+		"schema_version": "job-record/v1",
+		"job": map[string]any{
+			"schema_version": "service-job/v1",
+			"id":             "job_stale",
+			"type":           jobs.TypeRetrieve,
+			"status":         jobs.StatusRunning,
+			"created_at":     now,
+			"started_at":     now,
+		},
+		"events": []map[string]any{{
+			"time":    now,
+			"type":    "running",
+			"message": "job started",
+			"status":  jobs.StatusRunning,
+		}},
+	}
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("marshal record: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "job_stale.json"), body, 0o600); err != nil {
+		t.Fatalf("write stale record: %v", err)
+	}
+
+	manager := jobs.NewManager(jobs.WithFileStore(dir))
+	loaded, err := manager.Get("job_stale")
+	if err != nil {
+		t.Fatalf("load stale job: %v", err)
+	}
+	if loaded.Status != jobs.StatusFailed || loaded.Error != "job interrupted by service restart" || loaded.FinishedAt == nil {
+		t.Fatalf("loaded stale job = %#v", loaded)
+	}
+	events, err := manager.Events("job_stale")
+	if err != nil {
+		t.Fatalf("load events: %v", err)
+	}
+	if len(events) == 0 || events[len(events)-1].Type != "interrupted" || events[len(events)-1].Status != jobs.StatusFailed {
+		t.Fatalf("loaded stale events = %#v", events)
 	}
 }
 

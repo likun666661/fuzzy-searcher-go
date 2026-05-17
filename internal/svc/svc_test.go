@@ -380,6 +380,109 @@ func TestRetrieveJobLifecycle(t *testing.T) {
 	}
 }
 
+func TestRetrieveJobPersistsContractAcrossServiceRestart(t *testing.T) {
+	dir := t.TempDir()
+	graphPath, chunksPath := writeTinyGraphAndChunks(t, dir)
+	jobRoot := filepath.Join(dir, "jobs")
+	cfg := config.Config{JobRoot: jobRoot}
+
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"retrieve","retrieve":{"dataset":"demo","graph_path":` + quote(graphPath) + `,"chunks_path":` + quote(chunksPath) + `,"question":"Alice","mode":"native","top_k":5}}`)
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	_ = waitForServiceJob(t, routes, created.ID, "succeeded")
+	if _, err := os.Stat(filepath.Join(jobRoot, created.ID+".json")); err != nil {
+		t.Fatalf("persisted job record missing: %v", err)
+	}
+
+	restarted := svc.NewService(cfg)
+	restartedRoutes := restarted.Routes()
+	get := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID, nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("reloaded job status = %d, body = %s", get.Code, get.Body.String())
+	}
+	var job map[string]any
+	if err := json.Unmarshal(get.Body.Bytes(), &job); err != nil {
+		t.Fatalf("decode reloaded job: %v", err)
+	}
+	if job["schema_version"] != "service-job/v1" || job["type"] != "retrieve" || job["status"] != "succeeded" {
+		t.Fatalf("reloaded job envelope = %#v", job)
+	}
+	spec, ok := job["spec"].(map[string]any)
+	if !ok || spec["dataset"] != "demo" || spec["question"] != "Alice" || spec["mode"] != "native" || spec["top_k"] != float64(5) {
+		t.Fatalf("reloaded job spec = %#v", job["spec"])
+	}
+	assertJobArtifacts(t, job["artifacts"], map[string]string{
+		"graph":           "input:graph_json:",
+		"chunks":          "input:chunks_txt:",
+		"retrieve_result": "output:retrieve_result_json:retrieve-result/v1",
+	})
+	if _, ok := job["result"].(map[string]any); !ok {
+		t.Fatalf("reloaded job result = %#v", job["result"])
+	}
+
+	events := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("reloaded events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	for _, want := range []string{`"queued"`, `"running"`, `"retrieve_started"`, `"artifact_result_inline"`, `"succeeded"`} {
+		if !strings.Contains(events.Body.String(), want) {
+			t.Fatalf("reloaded events missing %s: %s", want, events.Body.String())
+		}
+	}
+}
+
+func TestRetrieveJobFailureKeepsStableErrorAndEvents(t *testing.T) {
+	service := svc.NewService(config.Config{})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"retrieve","retrieve":{"question":"Alice","mode":"native"}}`)
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "failed")
+	if got, _ := job["error"].(string); !strings.Contains(got, "graph_path is required") {
+		t.Fatalf("failed job error = %#v", job["error"])
+	}
+	spec, ok := job["spec"].(map[string]any)
+	if !ok || spec["question"] != "Alice" || spec["mode"] != "native" {
+		t.Fatalf("failed job spec = %#v", job["spec"])
+	}
+	assertJobArtifacts(t, job["artifacts"], map[string]string{
+		"retrieve_result": "output:retrieve_result_json:retrieve-result/v1",
+	})
+
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("failed events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"retrieve_started"`) || !strings.Contains(events.Body.String(), `"failed"`) || !strings.Contains(events.Body.String(), "graph_path is required") {
+		t.Fatalf("failed events body = %s", events.Body.String())
+	}
+}
+
 func TestJobValidation(t *testing.T) {
 	service := svc.NewService(config.Config{})
 	routes := service.Routes()
@@ -420,6 +523,31 @@ func waitForServiceJob(t *testing.T, routes http.Handler, id string, want string
 	}
 	t.Fatalf("job %s did not reach %s", id, want)
 	return nil
+}
+
+func assertJobArtifacts(t *testing.T, value any, expected map[string]string) {
+	t.Helper()
+	artifacts, ok := value.([]any)
+	if !ok {
+		t.Fatalf("job artifacts = %#v", value)
+	}
+	seen := map[string]string{}
+	for _, artifactValue := range artifacts {
+		artifact, ok := artifactValue.(map[string]any)
+		if !ok {
+			t.Fatalf("job artifact = %#v", artifactValue)
+		}
+		name, _ := artifact["name"].(string)
+		role, _ := artifact["role"].(string)
+		kind, _ := artifact["kind"].(string)
+		schema, _ := artifact["schema_version"].(string)
+		seen[name] = role + ":" + kind + ":" + schema
+	}
+	for name, want := range expected {
+		if seen[name] != want {
+			t.Fatalf("artifact %s = %q, want %q; all artifacts = %#v", name, seen[name], want, artifacts)
+		}
+	}
 }
 
 func writeTinyGraphAndChunks(t *testing.T, dir string) (string, string) {
