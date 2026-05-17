@@ -2,6 +2,7 @@ package svc_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -55,6 +56,24 @@ func TestRetrieveValidation(t *testing.T) {
 	}
 }
 
+func TestRetrieveUnsupportedModeReturnsBadRequest(t *testing.T) {
+	dir := t.TempDir()
+	graphPath, chunksPath := writeTinyGraphAndChunks(t, dir)
+
+	service := svc.NewService(config.Config{})
+	routes := service.Routes()
+
+	rec := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"graph_path":` + quote(graphPath) + `,"chunks_path":` + quote(chunksPath) + `,"question":"Alice","mode":"unknown-mode"}`)
+	routes.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/retrieve", body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("retrieve status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `unsupported mode`) || !strings.Contains(rec.Body.String(), `unknown-mode`) {
+		t.Fatalf("retrieve body = %s", rec.Body.String())
+	}
+}
+
 func TestDatasetEndpoints(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "data", "demo", "demo_corpus.json"), "{}")
@@ -92,6 +111,36 @@ func TestDatasetEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(artifacts.Body.String(), `"name":"graph"`) {
 		t.Fatalf("artifacts body = %s", artifacts.Body.String())
+	}
+}
+
+func TestReadyzReportsMissingRetrievalArtifacts(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "data", "demo", "demo_corpus.json"), "{}")
+	mustWrite(t, filepath.Join(root, "schemas", "demo.json"), "{}")
+
+	service := svc.NewService(config.Config{
+		DefaultDataset: "demo",
+		CorpusRoot:     filepath.Join(root, "data"),
+		SchemaRoot:     filepath.Join(root, "schemas"),
+		GraphRoot:      filepath.Join(root, "output", "graphs"),
+		ChunksRoot:     filepath.Join(root, "output", "chunks"),
+		CacheRoot:      filepath.Join(root, "retriever", "faiss_cache_new"),
+		GoldenRoot:     filepath.Join(root, "output", "retrieval_golden"),
+		TraceRoot:      filepath.Join(root, "output", "retrieval_traces"),
+		DatasetNames:   []string{"demo"},
+	})
+	routes := service.Routes()
+
+	rec := httptest.NewRecorder()
+	routes.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("ready status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{`"ready":false`, `"dataset_status":"schema_ready"`, `"graph"`, `"chunks"`, `"cache"`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("ready body missing %s: %s", want, rec.Body.String())
+		}
 	}
 }
 
@@ -145,25 +194,125 @@ func TestSidecarEndpointUnconfigured(t *testing.T) {
 	}
 }
 
+func TestRetrieveNativePath1RerankDoesNotCallPath1Primitive(t *testing.T) {
+	dir := t.TempDir()
+	graphPath, chunksPath := writeTinyGraphAndChunks(t, dir)
+	requests := map[string]int{}
+
+	sidecarServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests[r.URL.Path]++
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/retrieval/path1-triples":
+			t.Fatalf("native-path1-rerank must not call %s", r.URL.Path)
+		case "/v1/embed":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"model":     "test-model",
+				"dimension": 3,
+				"vectors":   [][]float32{{0.1, 0.2, 0.3}},
+			})
+		case "/v1/faiss/search":
+			var req struct {
+				Index string `json:"index"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode search request: %v", err)
+			}
+			hits := []map[string]any{}
+			switch req.Index {
+			case "node":
+				hits = []map[string]any{
+					{"id": "n1", "score": 0.9, "rank": 1},
+					{"id": "n2", "score": 0.8, "rank": 2},
+				}
+			case "relation":
+				hits = []map[string]any{{"id": "knows", "score": 0.7, "rank": 1}}
+			case "chunk":
+				hits = []map[string]any{{"id": "c1", "score": 0.6, "rank": 1}}
+			default:
+				t.Fatalf("unexpected search index %q", req.Index)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"dataset": "demo",
+				"index":   req.Index,
+				"hits":    hits,
+			})
+		case "/v1/retrieval/path2-triples":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"schema_version": "path2-triples/v1",
+				"dataset":        "demo",
+				"rescored_triples": []map[string]any{
+					{
+						"rank":             1,
+						"key":              "n1\tknows\tn2",
+						"head_id":          "n1",
+						"relation":         "knows",
+						"tail_id":          "n2",
+						"score":            0.9,
+						"formatted_triple": "(Alice, knows, Bob) [score: 0.900]",
+						"chunk_ids":        []string{"c1", "c2"},
+					},
+				},
+			})
+		case "/v1/retrieval/rerank-triples":
+			var req struct {
+				Triples []map[string]any `json:"triples"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode rerank request: %v", err)
+			}
+			if len(req.Triples) == 0 {
+				t.Fatalf("rerank request contained no raw triples")
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"schema_version": "rerank-triples/v1",
+				"dataset":        "demo",
+				"input_count":    len(req.Triples),
+				"reranked_triples": []map[string]any{
+					{
+						"rank":             1,
+						"key":              "n1\tknows\tn2",
+						"head_id":          "n1",
+						"relation":         "knows",
+						"tail_id":          "n2",
+						"score":            0.7,
+						"formatted_triple": "(Alice, knows, Bob) [score: 0.700]",
+						"chunk_ids":        []string{"c1", "c2"},
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer sidecarServer.Close()
+
+	service := svc.NewService(config.Config{})
+	routes := service.Routes()
+	rec := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"graph_path":` + quote(graphPath) + `,"chunks_path":` + quote(chunksPath) + `,"sidecar_url":` + quote(sidecarServer.URL) + `,"dataset":"demo","question":"Alice knows Bob","mode":"native-path1-rerank","top_k":5}`)
+	routes.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/retrieve", body))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("retrieve status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	for _, path := range []string{"/v1/embed", "/v1/faiss/search", "/v1/retrieval/path2-triples", "/v1/retrieval/rerank-triples"} {
+		if requests[path] == 0 {
+			t.Fatalf("expected sidecar path %s to be called; calls = %#v", path, requests)
+		}
+	}
+	if got := requests["/v1/retrieval/path1-triples"]; got != 0 {
+		t.Fatalf("path1 primitive called %d times", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"name":"go_path1_rerank_path2_primitive_merge"`) ||
+		!strings.Contains(rec.Body.String(), `"path1_schema_version":"go-path1-candidates/v1"`) ||
+		!strings.Contains(rec.Body.String(), `"rerank_input_count":1`) {
+		t.Fatalf("retrieve body missing native path1 debug meta: %s", rec.Body.String())
+	}
+}
+
 func TestRetrieveNative(t *testing.T) {
 	dir := t.TempDir()
-	graphPath := filepath.Join(dir, "graph.json")
-	chunksPath := filepath.Join(dir, "chunks.txt")
-	graphJSON := `[
-  {
-    "start_node": {"label": "entity", "properties": {"name": "Alice", "chunk id": "c1", "schema_type": "person"}},
-    "relation": "knows",
-    "end_node": {"label": "entity", "properties": {"name": "Bob", "chunk id": "c2", "schema_type": "person"}}
-  }
-]`
-	chunksText := "id: c1\tChunk: Alice knows Bob.\n" +
-		"id: c2\tChunk: Bob is known by Alice.\n"
-	if err := os.WriteFile(graphPath, []byte(graphJSON), 0o600); err != nil {
-		t.Fatalf("write graph: %v", err)
-	}
-	if err := os.WriteFile(chunksPath, []byte(chunksText), 0o600); err != nil {
-		t.Fatalf("write chunks: %v", err)
-	}
+	graphPath, chunksPath := writeTinyGraphAndChunks(t, dir)
 
 	service := svc.NewService(config.Config{})
 	routes := service.Routes()
@@ -180,6 +329,28 @@ func TestRetrieveNative(t *testing.T) {
 
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+}
+
+func writeTinyGraphAndChunks(t *testing.T, dir string) (string, string) {
+	t.Helper()
+	graphPath := filepath.Join(dir, "graph.json")
+	chunksPath := filepath.Join(dir, "chunks.txt")
+	graphJSON := `[
+  {
+    "start_node": {"id": "n1", "label": "entity", "properties": {"name": "Alice", "chunk id": "c1", "schema_type": "person"}},
+    "relation": "knows",
+    "end_node": {"id": "n2", "label": "entity", "properties": {"name": "Bob", "chunk id": "c2", "schema_type": "person"}}
+  }
+]`
+	chunksText := "id: c1\tChunk: Alice knows Bob.\n" +
+		"id: c2\tChunk: Bob is known by Alice.\n"
+	if err := os.WriteFile(graphPath, []byte(graphJSON), 0o600); err != nil {
+		t.Fatalf("write graph: %v", err)
+	}
+	if err := os.WriteFile(chunksPath, []byte(chunksText), 0o600); err != nil {
+		t.Fatalf("write chunks: %v", err)
+	}
+	return graphPath, chunksPath
 }
 
 func mustWrite(t *testing.T, path string, body string) {
