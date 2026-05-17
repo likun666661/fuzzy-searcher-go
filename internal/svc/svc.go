@@ -53,6 +53,7 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/datasets", s.handleDatasets)
 	mux.HandleFunc("POST /v1/datasets/import", s.handleImportDataset)
 	mux.HandleFunc("GET /v1/datasets/{dataset}", s.handleDataset)
+	mux.HandleFunc("DELETE /v1/datasets/{dataset}", s.handleDeleteDataset)
 	mux.HandleFunc("GET /v1/datasets/{dataset}/artifacts", s.handleDatasetArtifacts)
 	mux.HandleFunc("GET /v1/sidecars", s.handleSidecars)
 	mux.HandleFunc("GET /v1/sidecars/vector/health", s.handleVectorSidecarHealth)
@@ -153,6 +154,25 @@ func (s *Service) handleDataset(w http.ResponseWriter, r *http.Request) {
 	}
 	registry := artifacts.NewRegistry(s.config)
 	writeJSON(w, http.StatusOK, registry.Get(name))
+}
+
+func (s *Service) handleDeleteDataset(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("dataset")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_dataset", fmt.Errorf("dataset is required"))
+		return
+	}
+	result, err := datasetimport.Delete(s.config, datasetimport.DeleteRequest{
+		Dataset:       name,
+		IncludeOutput: queryBoolDefault(r, "include_outputs", true),
+		DryRun:        queryBoolDefault(r, "dry_run", false),
+		Force:         queryBoolDefault(r, "force", false),
+	})
+	if err != nil {
+		writeDatasetDeleteError(w, result, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Service) handleDatasetArtifacts(w http.ResponseWriter, r *http.Request) {
@@ -1304,5 +1324,39 @@ func writeDatasetImportError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "dataset_exists", err)
 	default:
 		writeError(w, http.StatusBadRequest, "dataset_import_failed", err)
+	}
+}
+
+func writeDatasetDeleteError(w http.ResponseWriter, result datasetimport.DeleteResult, err error) {
+	var deleteErr datasetimport.DeleteError
+	switch {
+	case errors.As(err, &deleteErr):
+		writeJSON(w, http.StatusInternalServerError, deleteErr.Result)
+	case errors.Is(err, datasetimport.ErrInvalidDataset):
+		writeError(w, http.StatusBadRequest, "invalid_dataset", err)
+	case errors.Is(err, datasetimport.ErrNotManaged):
+		writeError(w, http.StatusNotFound, "dataset_not_managed", err)
+	case errors.Is(err, datasetimport.ErrDeleteFailed):
+		if result.SchemaVersion != "" {
+			writeJSON(w, http.StatusInternalServerError, result)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "dataset_delete_failed", err)
+	default:
+		writeError(w, http.StatusInternalServerError, "dataset_delete_failed", err)
+	}
+}
+
+func queryBoolDefault(r *http.Request, key string, fallback bool) bool {
+	value := r.URL.Query().Get(key)
+	switch value {
+	case "":
+		return fallback
+	case "1", "true", "TRUE", "True", "yes", "YES", "on", "ON":
+		return true
+	case "0", "false", "FALSE", "False", "no", "NO", "off", "OFF":
+		return false
+	default:
+		return fallback
 	}
 }

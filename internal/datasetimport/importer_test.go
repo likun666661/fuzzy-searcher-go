@@ -77,6 +77,95 @@ func TestImportRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestDeleteRemovesManagedArtifactsOnly(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	sourceCorpus := filepath.Join(dir, "source", "corpus.json")
+	sourceSchema := filepath.Join(dir, "source", "schema.json")
+	mustWrite(t, sourceCorpus, `[]`)
+	mustWrite(t, sourceSchema, `{}`)
+	if _, err := datasetimport.Import(cfg, datasetimport.Request{Dataset: "demo", CorpusPath: sourceCorpus, SchemaPath: sourceSchema}); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(dir, "output", "graphs", "demo_new.json"),
+		filepath.Join(dir, "output", "chunks", "demo.txt"),
+		filepath.Join(dir, "retriever", "faiss_cache_new", "demo", "index.faiss"),
+		filepath.Join(dir, "output", "retrieval_golden", "demo.json"),
+		filepath.Join(dir, "output", "retrieval_traces", "demo_triple_trace.json"),
+		filepath.Join(dir, "output", "answers", "demo.json"),
+	} {
+		mustWrite(t, path, "{}")
+	}
+	legacyCorpus := filepath.Join(dir, "data", "demo", "demo_corpus.json")
+	mustWrite(t, legacyCorpus, `{"legacy":true}`)
+
+	result, err := datasetimport.Delete(cfg, datasetimport.DeleteRequest{Dataset: "demo", IncludeOutput: true})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if result.SchemaVersion != "dataset-delete/v1" || result.Status != "deleted" || len(result.Errors) != 0 {
+		t.Fatalf("delete result = %#v", result)
+	}
+	for _, path := range []string{
+		filepath.Join(dir, "data", "uploaded", "demo", "corpus.json"),
+		filepath.Join(dir, "schemas", "demo.json"),
+		filepath.Join(dir, "output", "datasets", "demo.json"),
+		filepath.Join(dir, "output", "graphs", "demo_new.json"),
+		filepath.Join(dir, "output", "chunks", "demo.txt"),
+		filepath.Join(dir, "retriever", "faiss_cache_new", "demo"),
+		filepath.Join(dir, "output", "retrieval_golden", "demo.json"),
+		filepath.Join(dir, "output", "retrieval_traces", "demo_triple_trace.json"),
+		filepath.Join(dir, "output", "answers", "demo.json"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected deleted artifact %s, stat err = %v", path, err)
+		}
+	}
+	if _, err := os.Stat(legacyCorpus); err != nil {
+		t.Fatalf("legacy corpus should not be deleted: %v", err)
+	}
+}
+
+func TestDeleteSupportsDryRunForceAndOutputScope(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	mustWrite(t, filepath.Join(dir, "data", "uploaded", "orphan", "corpus.json"), `[]`)
+	if _, err := datasetimport.Delete(cfg, datasetimport.DeleteRequest{Dataset: "orphan", IncludeOutput: true}); !errors.Is(err, datasetimport.ErrNotManaged) {
+		t.Fatalf("not managed delete err = %v", err)
+	}
+	dryRun, err := datasetimport.Delete(cfg, datasetimport.DeleteRequest{Dataset: "orphan", IncludeOutput: true, DryRun: true, Force: true})
+	if err != nil {
+		t.Fatalf("force dry-run delete: %v", err)
+	}
+	if dryRun.Status != "skipped" || !dryRun.DryRun {
+		t.Fatalf("dry run result = %#v", dryRun)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "data", "uploaded", "orphan", "corpus.json")); err != nil {
+		t.Fatalf("dry run removed corpus: %v", err)
+	}
+
+	sourceCorpus := filepath.Join(dir, "source", "corpus.json")
+	sourceSchema := filepath.Join(dir, "source", "schema.json")
+	mustWrite(t, sourceCorpus, `[]`)
+	mustWrite(t, sourceSchema, `{}`)
+	if _, err := datasetimport.Import(cfg, datasetimport.Request{Dataset: "scoped", CorpusPath: sourceCorpus, SchemaPath: sourceSchema}); err != nil {
+		t.Fatalf("import scoped: %v", err)
+	}
+	graph := filepath.Join(dir, "output", "graphs", "scoped_new.json")
+	mustWrite(t, graph, "[]")
+	result, err := datasetimport.Delete(cfg, datasetimport.DeleteRequest{Dataset: "scoped", IncludeOutput: false})
+	if err != nil {
+		t.Fatalf("scoped delete: %v", err)
+	}
+	if result.IncludeOutput {
+		t.Fatalf("include outputs = true: %#v", result)
+	}
+	if _, err := os.Stat(graph); err != nil {
+		t.Fatalf("graph output should be skipped: %v", err)
+	}
+}
+
 func testConfig(root string) config.Config {
 	return config.Config{
 		ArtifactRoot:    root,

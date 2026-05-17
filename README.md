@@ -63,6 +63,7 @@ It currently exposes the first service milestone:
 - `GET /v1/datasets`
 - `POST /v1/datasets/import`
 - `GET /v1/datasets/{dataset}`
+- `DELETE /v1/datasets/{dataset}`
 - `GET /v1/datasets/{dataset}/artifacts`
 - `GET /v1/sidecars`
 - `GET /v1/sidecars/vector/health`
@@ -201,6 +202,18 @@ The import copies files into `data/uploaded/<dataset>/corpus.json` and
 `schemas/<dataset>.json`, writes `dataset-import/v1` metadata under
 `output/datasets`, and makes the dataset visible to existing registry and
 `build_graph` paths. See `docs/contracts/dataset_import.md`.
+
+To delete a service-managed dataset and its managed outputs:
+
+```bash
+curl -s -X DELETE 'http://127.0.0.1:8080/v1/datasets/news_2026?dry_run=true'
+curl -s -X DELETE http://127.0.0.1:8080/v1/datasets/news_2026
+```
+
+Delete defaults to datasets with service metadata and only removes managed
+paths. Use `force=true` to clean known managed paths when metadata is already
+missing, and `include_outputs=false` to keep graph/chunks/cache/golden/trace
+outputs. See `docs/contracts/dataset_lifecycle.md`.
 
 By default the registry looks for a sibling `../youtu-graphrag` checkout. In a
 clean clone elsewhere, set `YOUTU_RAG_ARTIFACT_ROOT` or the individual root

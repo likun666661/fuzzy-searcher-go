@@ -24,6 +24,12 @@ var ErrAlreadyExists = errors.New("dataset import already exists")
 // ErrInvalidDataset means the dataset name is unsafe or unsupported.
 var ErrInvalidDataset = errors.New("invalid dataset")
 
+// ErrNotManaged means dataset metadata is missing and force was not requested.
+var ErrNotManaged = errors.New("dataset is not managed")
+
+// ErrDeleteFailed means one or more managed artifacts could not be deleted.
+var ErrDeleteFailed = errors.New("dataset delete failed")
+
 // Request is the stable dataset import request.
 type Request struct {
 	Dataset    string `json:"dataset"`
@@ -46,6 +52,41 @@ type Metadata struct {
 type Source struct {
 	CorpusPath string `json:"corpus_path"`
 	SchemaPath string `json:"schema_path"`
+}
+
+// DeleteResult is the stable response for deleting service-managed dataset
+// artifacts.
+type DeleteResult struct {
+	SchemaVersion string          `json:"schema_version"`
+	Dataset       string          `json:"dataset"`
+	Status        string          `json:"status"`
+	DryRun        bool            `json:"dry_run"`
+	IncludeOutput bool            `json:"include_outputs"`
+	DeletedAt     time.Time       `json:"deleted_at"`
+	Artifacts     []jobs.Artifact `json:"artifacts"`
+	Errors        []string        `json:"errors"`
+}
+
+// DeleteRequest configures safe managed dataset deletion.
+type DeleteRequest struct {
+	Dataset       string
+	IncludeOutput bool
+	DryRun        bool
+	Force         bool
+}
+
+// DeleteError carries a failed delete result with per-artifact statuses.
+type DeleteError struct {
+	Result DeleteResult
+	Err    error
+}
+
+func (e DeleteError) Error() string {
+	return e.Err.Error()
+}
+
+func (e DeleteError) Unwrap() error {
+	return e.Err
 }
 
 // Import copies a corpus/schema pair into the service-managed artifact roots
@@ -118,6 +159,76 @@ func Import(cfg config.Config, req Request) (Metadata, error) {
 		return Metadata{}, err
 	}
 	return metadata, nil
+}
+
+// Delete removes only service-managed artifacts for a dataset. It intentionally
+// avoids external source paths and legacy corpus layouts.
+func Delete(cfg config.Config, req DeleteRequest) (DeleteResult, error) {
+	if !datasetNamePattern.MatchString(req.Dataset) {
+		return DeleteResult{}, fmt.Errorf("%w: dataset must match %s", ErrInvalidDataset, datasetNamePattern.String())
+	}
+	paths := managedPaths(cfg, req.Dataset)
+	if _, err := os.Stat(paths.metadata); err != nil && !req.Force {
+		if errors.Is(err, os.ErrNotExist) {
+			return DeleteResult{}, fmt.Errorf("%w: %s", ErrNotManaged, req.Dataset)
+		}
+		return DeleteResult{}, fmt.Errorf("stat metadata %s: %w", paths.metadata, err)
+	}
+	candidates := managedDeleteArtifacts(cfg, req.Dataset)
+	artifacts := make([]jobs.Artifact, 0, len(candidates))
+	deleteErrors := []string{}
+	for _, candidate := range candidates {
+		if candidate.Role == "output" && !isCoreDatasetArtifact(candidate.Name) && !req.IncludeOutput {
+			artifact := candidate
+			artifact.Status = "skipped"
+			artifacts = append(artifacts, artifact)
+			continue
+		}
+		status := "missing"
+		if _, err := os.Stat(candidate.Path); err == nil {
+			if req.DryRun {
+				status = "skipped"
+			} else if err := os.RemoveAll(candidate.Path); err != nil {
+				status = "failed"
+				deleteErrors = append(deleteErrors, fmt.Sprintf("delete %s artifact %s: %v", candidate.Name, candidate.Path, err))
+			} else {
+				status = "deleted"
+				if candidate.Name == "corpus" {
+					removeEmptyParent(filepath.Dir(candidate.Path))
+				}
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			status = "failed"
+			deleteErrors = append(deleteErrors, fmt.Sprintf("stat %s artifact %s: %v", candidate.Name, candidate.Path, err))
+		}
+		artifact := candidate
+		artifact.Status = status
+		artifacts = append(artifacts, artifact)
+	}
+	status := "deleted"
+	if req.DryRun {
+		status = "skipped"
+	}
+	if len(deleteErrors) > 0 {
+		status = "failed"
+	}
+	result := DeleteResult{
+		SchemaVersion: "dataset-delete/v1",
+		Dataset:       req.Dataset,
+		Status:        status,
+		DryRun:        req.DryRun,
+		IncludeOutput: req.IncludeOutput,
+		DeletedAt:     time.Now().UTC(),
+		Artifacts:     artifacts,
+		Errors:        deleteErrors,
+	}
+	if len(deleteErrors) > 0 {
+		return result, DeleteError{
+			Result: result,
+			Err:    fmt.Errorf("%w: %s", ErrDeleteFailed, req.Dataset),
+		}
+	}
+	return result, nil
 }
 
 func validateRequest(req Request) error {
@@ -197,6 +308,97 @@ func copyFile(src string, dst string) error {
 		return fmt.Errorf("close destination %s: %w", tmp, err)
 	}
 	return os.Rename(tmp, dst)
+}
+
+func managedDeleteArtifacts(cfg config.Config, dataset string) []jobs.Artifact {
+	paths := managedPaths(cfg, dataset)
+	return []jobs.Artifact{
+		{
+			Name:        "corpus",
+			Role:        "input",
+			Kind:        "corpus_json",
+			Dataset:     dataset,
+			Path:        paths.corpus,
+			Description: "Service-managed uploaded corpus for this dataset.",
+		},
+		{
+			Name:        "schema",
+			Role:        "input",
+			Kind:        "schema_json",
+			Dataset:     dataset,
+			Path:        paths.schema,
+			Description: "Service-managed schema for this dataset.",
+		},
+		{
+			Name:          "metadata",
+			Role:          "output",
+			Kind:          "dataset_metadata_json",
+			SchemaVersion: SchemaVersion,
+			Dataset:       dataset,
+			Path:          paths.metadata,
+			Description:   "Dataset import metadata persisted by the Go service.",
+		},
+		{
+			Name:          "graph",
+			Role:          "output",
+			Kind:          "graph_json",
+			SchemaVersion: "youtu-graph/v1",
+			Dataset:       dataset,
+			Path:          filepath.Join(cfg.GraphRoot, dataset+"_new.json"),
+			Description:   "Knowledge graph produced for this dataset.",
+		},
+		{
+			Name:        "chunks",
+			Role:        "output",
+			Kind:        "chunks_txt",
+			Dataset:     dataset,
+			Path:        filepath.Join(cfg.ChunksRoot, dataset+".txt"),
+			Description: "Chunk text file produced for this dataset.",
+		},
+		{
+			Name:        "cache",
+			Role:        "output",
+			Kind:        "faiss_cache_dir",
+			Dataset:     dataset,
+			Path:        filepath.Join(cfg.CacheRoot, dataset),
+			Description: "Vector cache directory for this dataset.",
+		},
+		{
+			Name:          "golden",
+			Role:          "output",
+			Kind:          "retriever_golden_json",
+			SchemaVersion: "retriever-golden/v1",
+			Dataset:       dataset,
+			Path:          filepath.Join(cfg.GoldenRoot, dataset+".json"),
+			Description:   "Retriever golden fixture for this dataset.",
+		},
+		{
+			Name:          "triple_trace",
+			Role:          "output",
+			Kind:          "triple_trace_json",
+			SchemaVersion: "triple-trace/v1",
+			Dataset:       dataset,
+			Path:          filepath.Join(cfg.TraceRoot, dataset+"_triple_trace.json"),
+			Description:   "Python-authoritative triple trace for this dataset.",
+		},
+		{
+			Name:          "answer",
+			Role:          "output",
+			Kind:          "answer_json",
+			SchemaVersion: "answer-output/v1",
+			Dataset:       dataset,
+			Path:          filepath.Join(cfg.ArtifactRoot, "output", "answers", dataset+".json"),
+			Description:   "Answer output for this dataset.",
+		},
+	}
+}
+
+func isCoreDatasetArtifact(name string) bool {
+	return name == "corpus" || name == "schema" || name == "metadata"
+}
+
+func removeEmptyParent(path string) {
+	_ = os.Remove(path)
 }
 
 func writeMetadata(path string, metadata Metadata) error {

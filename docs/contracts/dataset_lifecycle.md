@@ -89,7 +89,8 @@ Artifact status values:
 
 - `deleted`: file or directory existed and was removed.
 - `missing`: artifact was in the managed deletion set but did not exist.
-- `skipped`: artifact was not included by query options.
+- `skipped`: artifact was not included by query options, or `dry_run=true`
+  reported an existing artifact without deleting it.
 - `failed`: deletion was attempted and failed; the response status should be
   `failed`.
 

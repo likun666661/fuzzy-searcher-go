@@ -259,6 +259,100 @@ with open(chunks, "w", encoding="utf-8") as f:
 	}
 }
 
+func TestDatasetDeleteEndpoint(t *testing.T) {
+	root := t.TempDir()
+	sourceCorpus := filepath.Join(root, "incoming", "corpus.json")
+	sourceSchema := filepath.Join(root, "incoming", "schema.json")
+	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
+	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	cfg := config.Config{
+		ArtifactRoot:    root,
+		DefaultDataset:  "demo",
+		CorpusRoot:      filepath.Join(root, "data"),
+		SchemaRoot:      filepath.Join(root, "schemas"),
+		GraphRoot:       filepath.Join(root, "output", "graphs"),
+		ChunksRoot:      filepath.Join(root, "output", "chunks"),
+		CacheRoot:       filepath.Join(root, "retriever", "faiss_cache_new"),
+		GoldenRoot:      filepath.Join(root, "output", "retrieval_golden"),
+		TraceRoot:       filepath.Join(root, "output", "retrieval_traces"),
+		DatasetMetaRoot: filepath.Join(root, "output", "datasets"),
+		DatasetNames:    []string{"demo"},
+	}
+	routes := svc.NewService(cfg).Routes()
+	imported := httptest.NewRecorder()
+	routes.ServeHTTP(imported, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"imported","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
+	if imported.Code != http.StatusCreated {
+		t.Fatalf("import status = %d, body = %s", imported.Code, imported.Body.String())
+	}
+	for _, path := range []string{
+		filepath.Join(root, "output", "graphs", "imported_new.json"),
+		filepath.Join(root, "output", "chunks", "imported.txt"),
+		filepath.Join(root, "retriever", "faiss_cache_new", "imported", "index.faiss"),
+		filepath.Join(root, "output", "retrieval_golden", "imported.json"),
+		filepath.Join(root, "output", "retrieval_traces", "imported_triple_trace.json"),
+		filepath.Join(root, "output", "answers", "imported.json"),
+		filepath.Join(root, "output", "graphs", "other_new.json"),
+	} {
+		mustWrite(t, path, "{}")
+	}
+
+	dryRun := httptest.NewRecorder()
+	routes.ServeHTTP(dryRun, httptest.NewRequest(http.MethodDelete, "/v1/datasets/imported?dry_run=true", nil))
+	if dryRun.Code != http.StatusOK ||
+		!strings.Contains(dryRun.Body.String(), `"schema_version":"dataset-delete/v1"`) ||
+		!strings.Contains(dryRun.Body.String(), `"dry_run":true`) ||
+		!strings.Contains(dryRun.Body.String(), `"status":"skipped"`) {
+		t.Fatalf("dry-run delete status = %d, body = %s", dryRun.Code, dryRun.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "output", "datasets", "imported.json")); err != nil {
+		t.Fatalf("dry-run should not delete metadata: %v", err)
+	}
+
+	deleted := httptest.NewRecorder()
+	routes.ServeHTTP(deleted, httptest.NewRequest(http.MethodDelete, "/v1/datasets/imported", nil))
+	if deleted.Code != http.StatusOK ||
+		!strings.Contains(deleted.Body.String(), `"status":"deleted"`) ||
+		!strings.Contains(deleted.Body.String(), `"name":"corpus"`) ||
+		!strings.Contains(deleted.Body.String(), `"name":"answer"`) {
+		t.Fatalf("delete status = %d, body = %s", deleted.Code, deleted.Body.String())
+	}
+	for _, path := range []string{
+		filepath.Join(root, "data", "uploaded", "imported", "corpus.json"),
+		filepath.Join(root, "schemas", "imported.json"),
+		filepath.Join(root, "output", "datasets", "imported.json"),
+		filepath.Join(root, "output", "graphs", "imported_new.json"),
+		filepath.Join(root, "output", "chunks", "imported.txt"),
+		filepath.Join(root, "retriever", "faiss_cache_new", "imported"),
+		filepath.Join(root, "output", "retrieval_golden", "imported.json"),
+		filepath.Join(root, "output", "retrieval_traces", "imported_triple_trace.json"),
+		filepath.Join(root, "output", "answers", "imported.json"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected deleted artifact %s, stat err = %v", path, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "output", "graphs", "other_new.json")); err != nil {
+		t.Fatalf("other dataset graph should remain: %v", err)
+	}
+	loaded := httptest.NewRecorder()
+	svc.NewService(cfg).Routes().ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/datasets/imported", nil))
+	if loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), `"status":"empty"`) {
+		t.Fatalf("loaded deleted dataset status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+
+	notManaged := httptest.NewRecorder()
+	routes.ServeHTTP(notManaged, httptest.NewRequest(http.MethodDelete, "/v1/datasets/orphan", nil))
+	if notManaged.Code != http.StatusNotFound || !strings.Contains(notManaged.Body.String(), "dataset_not_managed") {
+		t.Fatalf("not managed delete status = %d, body = %s", notManaged.Code, notManaged.Body.String())
+	}
+	mustWrite(t, filepath.Join(root, "data", "uploaded", "orphan", "corpus.json"), `[]`)
+	forced := httptest.NewRecorder()
+	routes.ServeHTTP(forced, httptest.NewRequest(http.MethodDelete, "/v1/datasets/orphan?force=true&include_outputs=false", nil))
+	if forced.Code != http.StatusOK || !strings.Contains(forced.Body.String(), `"include_outputs":false`) || !strings.Contains(forced.Body.String(), `"status":"skipped"`) {
+		t.Fatalf("forced scoped delete status = %d, body = %s", forced.Code, forced.Body.String())
+	}
+}
+
 func TestParseDocumentsJobLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "parse_worker.py")
