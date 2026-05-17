@@ -60,6 +60,8 @@ It currently exposes the first service milestone:
 - `GET /v1/datasets`
 - `GET /v1/datasets/{dataset}`
 - `GET /v1/datasets/{dataset}/artifacts`
+- `GET /v1/sidecars`
+- `GET /v1/sidecars/vector/health`
 - `POST /v1/retrieve`
 
 Run it with explicit demo artifacts:
@@ -96,6 +98,14 @@ By default the registry looks for a sibling `../youtu-graphrag` checkout. In a
 clean clone elsewhere, set `YOUTU_RAG_ARTIFACT_ROOT` or the individual root
 variables (`YOUTU_RAG_SCHEMA_ROOT`, `YOUTU_RAG_GRAPH_ROOT`,
 `YOUTU_RAG_CHUNKS_ROOT`, `YOUTU_RAG_CACHE_ROOT`) explicitly.
+
+Sidecar lifecycle endpoints report whether the Python vector sidecar is
+configured and whether the dataset cache health endpoint is reachable:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/sidecars
+curl -s 'http://127.0.0.1:8080/v1/sidecars/vector/health?dataset=demo'
+```
 
 If the Python sidecar is running, run the demo parity gates:
 

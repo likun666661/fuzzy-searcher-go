@@ -95,6 +95,56 @@ func TestDatasetEndpoints(t *testing.T) {
 	}
 }
 
+func TestSidecarEndpoints(t *testing.T) {
+	sidecarServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/datasets/demo/cache" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"dataset":"demo","indices":{"chunk":{"dimension":384,"ntotal":3}}}`))
+	}))
+	defer sidecarServer.Close()
+
+	service := svc.NewService(config.Config{
+		DefaultDataset: "demo",
+		DefaultSidecar: sidecarServer.URL,
+	})
+	routes := service.Routes()
+
+	list := httptest.NewRecorder()
+	routes.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/sidecars", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("sidecars status = %d, body = %s", list.Code, list.Body.String())
+	}
+	if !strings.Contains(list.Body.String(), `"reachable":true`) {
+		t.Fatalf("sidecars body = %s", list.Body.String())
+	}
+
+	health := httptest.NewRecorder()
+	routes.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/v1/sidecars/vector/health?dataset=demo", nil))
+	if health.Code != http.StatusOK {
+		t.Fatalf("sidecar health status = %d, body = %s", health.Code, health.Body.String())
+	}
+	if !strings.Contains(health.Body.String(), `"dimension":384`) {
+		t.Fatalf("sidecar health body = %s", health.Body.String())
+	}
+}
+
+func TestSidecarEndpointUnconfigured(t *testing.T) {
+	service := svc.NewService(config.Config{DefaultDataset: "demo"})
+	routes := service.Routes()
+
+	health := httptest.NewRecorder()
+	routes.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/v1/sidecars/vector/health", nil))
+	if health.Code != http.StatusOK {
+		t.Fatalf("sidecar health status = %d, body = %s", health.Code, health.Body.String())
+	}
+	if !strings.Contains(health.Body.String(), `"configured":false`) {
+		t.Fatalf("sidecar health body = %s", health.Body.String())
+	}
+}
+
 func TestRetrieveNative(t *testing.T) {
 	dir := t.TempDir()
 	graphPath := filepath.Join(dir, "graph.json")

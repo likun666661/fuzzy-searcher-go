@@ -26,6 +26,14 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
+// BaseURL returns the configured sidecar base URL.
+func (c *Client) BaseURL() string {
+	if c == nil {
+		return ""
+	}
+	return c.baseURL
+}
+
 // EmbedRequest is POST /v1/embed input.
 type EmbedRequest struct {
 	Texts     []string `json:"texts"`
@@ -164,6 +172,22 @@ func (c *Client) RerankTriples(ctx context.Context, req RerankTriplesRequest, ou
 	return c.post(ctx, "/v1/retrieval/rerank-triples", req, out)
 }
 
+// CacheHealth requests dataset cache health from the Python sidecar.
+func (c *Client) CacheHealth(ctx context.Context, dataset string, out any) error {
+	return c.get(ctx, "/v1/datasets/"+dataset+"/cache", out)
+}
+
+func (c *Client) get(ctx context.Context, path string, out any) error {
+	if c == nil || c.baseURL == "" {
+		return fmt.Errorf("sidecar client is not configured")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("build sidecar request: %w", err)
+	}
+	return c.do(req, path, out)
+}
+
 func (c *Client) post(ctx context.Context, path string, in any, out any) error {
 	if c == nil || c.baseURL == "" {
 		return fmt.Errorf("sidecar client is not configured")
@@ -178,6 +202,10 @@ func (c *Client) post(ctx context.Context, path string, in any, out any) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	return c.do(req, path, out)
+}
+
+func (c *Client) do(req *http.Request, path string, out any) error {
 	httpResp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("call sidecar %s: %w", path, err)

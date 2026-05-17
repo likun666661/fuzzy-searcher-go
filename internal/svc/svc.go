@@ -38,6 +38,8 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/datasets", s.handleDatasets)
 	mux.HandleFunc("GET /v1/datasets/{dataset}", s.handleDataset)
 	mux.HandleFunc("GET /v1/datasets/{dataset}/artifacts", s.handleDatasetArtifacts)
+	mux.HandleFunc("GET /v1/sidecars", s.handleSidecars)
+	mux.HandleFunc("GET /v1/sidecars/vector/health", s.handleVectorSidecarHealth)
 	mux.HandleFunc("POST /v1/retrieve", s.handleRetrieve)
 	return mux
 }
@@ -123,6 +125,65 @@ func (s *Service) handleDatasetArtifacts(w http.ResponseWriter, r *http.Request)
 		"dataset":   name,
 		"artifacts": registry.Artifacts(name),
 	})
+}
+
+func (s *Service) handleSidecars(w http.ResponseWriter, r *http.Request) {
+	status := s.vectorSidecarStatus(r.Context(), s.config.DefaultDataset)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"sidecars": []sidecarStatus{status},
+	})
+}
+
+func (s *Service) handleVectorSidecarHealth(w http.ResponseWriter, r *http.Request) {
+	dataset := r.URL.Query().Get("dataset")
+	if dataset == "" {
+		dataset = s.config.DefaultDataset
+	}
+	status := s.vectorSidecarStatus(r.Context(), dataset)
+	httpStatus := http.StatusOK
+	if status.Configured && !status.Reachable {
+		httpStatus = http.StatusServiceUnavailable
+	}
+	writeJSON(w, httpStatus, status)
+}
+
+type sidecarStatus struct {
+	Name       string `json:"name"`
+	Configured bool   `json:"configured"`
+	URL        string `json:"url,omitempty"`
+	Dataset    string `json:"dataset,omitempty"`
+	Reachable  bool   `json:"reachable"`
+	Error      string `json:"error,omitempty"`
+	Cache      any    `json:"cache,omitempty"`
+}
+
+func (s *Service) vectorSidecarStatus(ctx context.Context, dataset string) sidecarStatus {
+	status := sidecarStatus{
+		Name:       "vector",
+		Configured: s.config.DefaultSidecar != "",
+		URL:        s.config.DefaultSidecar,
+		Dataset:    dataset,
+	}
+	if !status.Configured {
+		status.Error = "YOUTU_RAG_SIDECAR_URL is not configured"
+		return status
+	}
+	if dataset == "" {
+		dataset = "demo"
+		status.Dataset = dataset
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	var cache map[string]any
+	client := sidecar.NewClient(s.config.DefaultSidecar)
+	if err := client.CacheHealth(checkCtx, dataset, &cache); err != nil {
+		status.Error = err.Error()
+		return status
+	}
+	status.Reachable = true
+	status.Cache = cache
+	return status
 }
 
 type retrieveHTTPInput struct {

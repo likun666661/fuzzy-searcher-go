@@ -174,3 +174,31 @@ func TestRerankTriples(t *testing.T) {
 		t.Fatalf("out = %#v", out)
 	}
 }
+
+func TestCacheHealth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/datasets/demo/cache" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"dataset": "demo",
+			"indices": map[string]any{
+				"chunk": map[string]any{"dimension": 384, "ntotal": 3},
+			},
+		})
+	}))
+	defer server.Close()
+
+	var out struct {
+		Dataset string `json:"dataset"`
+	}
+	err := sidecar.NewClient(server.URL).CacheHealth(context.Background(), "demo", &out)
+	if err != nil {
+		t.Fatalf("CacheHealth: %v", err)
+	}
+	if out.Dataset != "demo" {
+		t.Fatalf("out = %#v", out)
+	}
+}
