@@ -19,6 +19,7 @@ import (
 	"github.com/fuzzy-searcher-go/internal/workers/answer"
 	"github.com/fuzzy-searcher-go/internal/workers/buildgraph"
 	"github.com/fuzzy-searcher-go/internal/workers/golden"
+	"github.com/fuzzy-searcher-go/internal/workers/parsedocs"
 	"github.com/fuzzy-searcher-go/internal/workflows"
 )
 
@@ -209,6 +210,7 @@ type createJobRequest struct {
 	Type           string                     `json:"type"`
 	Retrieve       orchestrator.RetrieveInput `json:"retrieve,omitempty"`
 	GenerateGolden jobs.GenerateGoldenSpec    `json:"generate_golden,omitempty"`
+	ParseDocuments jobs.ParseDocumentsSpec    `json:"parse_documents,omitempty"`
 	BuildGraph     jobs.BuildGraphSpec        `json:"build_graph,omitempty"`
 	Answer         jobs.AnswerSpec            `json:"answer,omitempty"`
 }
@@ -240,6 +242,10 @@ func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	case jobs.TypeGenerateGolden:
 		spec := s.generateGoldenSpec(input.GenerateGolden)
 		job := s.submitGenerateGoldenJob(spec)
+		writeJSON(w, http.StatusAccepted, job)
+	case jobs.TypeParseDocuments:
+		spec := s.parseDocumentsSpec(input.ParseDocuments)
+		job := s.submitParseDocumentsJob(spec)
 		writeJSON(w, http.StatusAccepted, job)
 	case jobs.TypeBuildGraph:
 		spec := s.buildGraphSpec(input.BuildGraph)
@@ -366,6 +372,77 @@ func generateGoldenArtifacts(spec jobs.GenerateGoldenSpec) []jobs.Artifact {
 			Description:   "Python retriever golden fixture written by generate_golden worker.",
 		},
 	}
+}
+
+func (s *Service) parseDocumentsSpec(input jobs.ParseDocumentsSpec) jobs.ParseDocumentsSpec {
+	spec := input
+	if spec.Dataset == "" {
+		spec.Dataset = s.config.DefaultDataset
+	}
+	if spec.Dataset == "" {
+		spec.Dataset = "demo"
+	}
+	if spec.OutputPath == "" {
+		spec.OutputPath = filepath.Join(s.config.CorpusRoot, "uploaded", spec.Dataset, "corpus.json")
+	}
+	if spec.PythonBin == "" {
+		spec.PythonBin = s.config.PythonBin
+	}
+	if spec.ScriptPath == "" {
+		spec.ScriptPath = s.config.ParseDocsScript
+	}
+	if spec.WorkingDir == "" {
+		spec.WorkingDir = s.config.WorkerCWD
+	}
+	return spec
+}
+
+func (s *Service) submitParseDocumentsJob(spec jobs.ParseDocumentsSpec) jobs.Job {
+	artifacts := parseDocumentsArtifacts(spec)
+	return s.jobs.SubmitSpec(jobs.TypeParseDocuments, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+		recorder.Event("worker_started", "parse_documents Python worker started")
+		recorder.Artifact("corpus", "running", "")
+		result, err := parsedocs.Run(ctx, parsedocs.Config{
+			PythonBin:  spec.PythonBin,
+			ScriptPath: spec.ScriptPath,
+			WorkingDir: spec.WorkingDir,
+		}, spec)
+		if err == nil {
+			recorder.Artifact("corpus", "written", result.OutputPath)
+			recorder.Event("artifact_corpus_written", "corpus artifact written")
+		} else if errors.Is(err, parsedocs.ErrMissingOutput) {
+			recorder.Artifact("corpus", "missing", "")
+		} else {
+			recorder.Artifact("corpus", "failed", "")
+		}
+		return result, err
+	})
+}
+
+func parseDocumentsArtifacts(spec jobs.ParseDocumentsSpec) []jobs.Artifact {
+	artifacts := make([]jobs.Artifact, 0, len(spec.DocumentPaths)+1)
+	for idx, path := range spec.DocumentPaths {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        fmt.Sprintf("document_%d", idx+1),
+			Role:        "input",
+			Kind:        "source_document",
+			Dataset:     spec.Dataset,
+			Path:        path,
+			Status:      "configured",
+			Description: "Raw document consumed by the parse_documents worker.",
+		})
+	}
+	artifacts = append(artifacts, jobs.Artifact{
+		Name:          "corpus",
+		Role:          "output",
+		Kind:          "corpus_json",
+		SchemaVersion: "corpus-json/v1",
+		Dataset:       spec.Dataset,
+		Path:          spec.OutputPath,
+		Status:        "pending",
+		Description:   "Corpus JSON written by the parse_documents worker.",
+	})
+	return artifacts
 }
 
 func (s *Service) buildGraphSpec(input jobs.BuildGraphSpec) jobs.BuildGraphSpec {

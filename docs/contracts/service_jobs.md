@@ -34,7 +34,7 @@ Stable fields:
 - `schema_version`: job envelope version. Current value is `service-job/v1`.
 - `id`: service-assigned job id.
 - `type`: job type. Current implemented types are `retrieve`,
-  `generate_golden`, `build_graph`, and `answer`.
+  `parse_documents`, `generate_golden`, `build_graph`, and `answer`.
 - `status`: one of `queued`, `running`, `succeeded`, `failed`, `canceled`.
 - `spec`: typed request payload for the job type.
 - `artifacts`: input/output artifact metadata.
@@ -192,6 +192,59 @@ on disk as the `golden_fixture` artifact.
 
 The detailed Python worker command contract is defined in
 `docs/contracts/generate_golden_worker.md`.
+
+## Implemented Job: parse_documents
+
+`parse_documents` turns raw source files into a tracked corpus JSON artifact.
+Go owns the job envelope, lifecycle events, persistence, worker command
+execution, stdout/stderr capture, and artifact metadata. Python continues to
+own document parsing internals such as encoding fallback, PDF/DOCX extraction,
+markdown cleanup, OCR, and future parser-specific dependencies.
+
+Submit:
+
+```json
+{
+  "type": "parse_documents",
+  "parse_documents": {
+    "dataset": "news_2026",
+    "document_paths": [
+      "/abs/path/incoming/a.pdf",
+      "/abs/path/incoming/b.md"
+    ],
+    "output_path": "/abs/path/youtu-graphrag/data/uploaded/news_2026/corpus.json"
+  }
+}
+```
+
+The service stores this as a typed `ParseDocumentsSpec` in `job.spec`. The
+resolved worker command fields are also persisted:
+
+```json
+{
+  "dataset": "news_2026",
+  "document_paths": ["/abs/path/incoming/a.pdf"],
+  "output_path": "/abs/path/youtu-graphrag/data/uploaded/news_2026/corpus.json",
+  "python_bin": "/abs/path/youtu-graphrag/.venv/bin/python",
+  "script_path": "/abs/path/youtu-graphrag/scripts/parse_documents_worker.py",
+  "working_dir": "/abs/path/youtu-graphrag"
+}
+```
+
+`parse_documents` jobs report:
+
+- `document_1`, `document_2`, ... input artifacts with `kind=source_document`.
+- `corpus` output artifact with `kind=corpus_json`,
+  `schema_version=corpus-json/v1`, and status `pending` -> `written`,
+  `missing`, or `failed`.
+
+Completed jobs return a small inline `parse-documents-result/v1` result with
+the dataset, output path, document paths, and captured stdout/stderr. The corpus
+JSON remains on disk as the `corpus` artifact and can feed dataset import or
+`build_graph`.
+
+The detailed Python worker command contract is defined in
+`docs/contracts/parse_documents_worker.md`.
 
 ## Implemented Job: build_graph
 

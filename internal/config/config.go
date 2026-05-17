@@ -34,6 +34,7 @@ type Config struct {
 	WorkflowRoot     string
 	PythonBin        string
 	GoldenScript     string
+	ParseDocsScript  string
 	BuildGraphScript string
 	AnswerScript     string
 	WorkerCWD        string
@@ -69,6 +70,7 @@ func Load() Config {
 		WorkflowRoot:     getenv("YOUTU_RAG_WORKFLOW_ROOT", filepath.Join(artifactRoot, "output", "workflows")),
 		PythonBin:        getenv("YOUTU_RAG_PYTHON", filepath.Join(artifactRoot, ".venv", "bin", "python")),
 		GoldenScript:     getenv("YOUTU_RAG_GOLDEN_SCRIPT", filepath.Join(artifactRoot, "scripts", "generate_retriever_golden.py")),
+		ParseDocsScript:  getenv("YOUTU_RAG_PARSE_DOCUMENTS_SCRIPT", filepath.Join(artifactRoot, "scripts", "parse_documents_worker.py")),
 		BuildGraphScript: getenv("YOUTU_RAG_BUILD_GRAPH_SCRIPT", filepath.Join(artifactRoot, "scripts", "build_graph_worker.py")),
 		AnswerScript:     getenv("YOUTU_RAG_ANSWER_SCRIPT", filepath.Join(artifactRoot, "scripts", "answer_worker.py")),
 		WorkerCWD:        getenv("YOUTU_RAG_WORKER_CWD", artifactRoot),

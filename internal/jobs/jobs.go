@@ -20,6 +20,7 @@ type Status string
 
 const (
 	TypeRetrieve       = "retrieve"
+	TypeParseDocuments = "parse_documents"
 	TypeBuildGraph     = "build_graph"
 	TypeGenerateGolden = "generate_golden"
 	TypeAnswer         = "answer"
@@ -95,6 +96,18 @@ type GenerateGoldenSpec struct {
 	PythonBin        string   `json:"python_bin,omitempty"`
 	ScriptPath       string   `json:"script_path,omitempty"`
 	WorkingDir       string   `json:"working_dir,omitempty"`
+}
+
+// ParseDocumentsSpec is the typed job spec for Python document parsing workers.
+type ParseDocumentsSpec struct {
+	Dataset       string   `json:"dataset"`
+	DocumentPaths []string `json:"document_paths"`
+	OutputPath    string   `json:"output_path"`
+	ConfigPath    string   `json:"config_path,omitempty"`
+	Mode          string   `json:"mode,omitempty"`
+	PythonBin     string   `json:"python_bin,omitempty"`
+	ScriptPath    string   `json:"script_path,omitempty"`
+	WorkingDir    string   `json:"working_dir,omitempty"`
 }
 
 // BuildGraphSpec is the typed job spec for Python graph construction workers.

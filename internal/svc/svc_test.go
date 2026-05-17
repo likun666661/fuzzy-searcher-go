@@ -3,6 +3,7 @@ package svc_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -255,6 +256,74 @@ with open(chunks, "w", encoding="utf-8") as f:
 	}
 	if _, err := os.Stat(filepath.Join(root, "output", "datasets", "badjson.json")); !os.IsNotExist(err) {
 		t.Fatalf("bad schema import should not persist metadata, stat err = %v", err)
+	}
+}
+
+func TestParseDocumentsJobLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "parse_worker.py")
+	document := filepath.Join(dir, "incoming", "doc.txt")
+	mustWrite(t, document, "hello from document")
+	writeExecutable(t, script, `#!/usr/bin/env python3
+import json
+import os
+import sys
+dataset = sys.argv[sys.argv.index("--dataset") + 1]
+output = sys.argv[sys.argv.index("--output") + 1]
+document = sys.argv[sys.argv.index("--document") + 1]
+os.makedirs(os.path.dirname(output), exist_ok=True)
+with open(output, "w", encoding="utf-8") as f:
+    json.dump([{"id": dataset + "-doc-1", "text": open(document, encoding="utf-8").read()}], f)
+print("parsed ok")
+`)
+	cfg := config.Config{
+		DefaultDataset:  "demo",
+		ArtifactRoot:    dir,
+		CorpusRoot:      filepath.Join(dir, "data"),
+		SchemaRoot:      filepath.Join(dir, "schemas"),
+		JobRoot:         filepath.Join(dir, "jobs"),
+		PythonBin:       "python3",
+		ParseDocsScript: script,
+		WorkerCWD:       dir,
+		DatasetNames:    []string{"demo"},
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"parse_documents","parse_documents":{"dataset":"imported","document_paths":[` + quote(document) + `]}}`)
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create parse_documents status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode parse_documents job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "succeeded")
+	if job["type"] != "parse_documents" {
+		t.Fatalf("job = %#v", job)
+	}
+	outputPath := filepath.Join(dir, "data", "uploaded", "imported", "corpus.json")
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("parse_documents output missing: %v", err)
+	}
+	if !containsArtifactStatus(job, "corpus", "written") ||
+		!strings.Contains(fmt.Sprint(job["result"]), "parse-documents-result/v1") {
+		t.Fatalf("parse_documents job = %#v", job)
+	}
+	spec, ok := job["spec"].(map[string]any)
+	if !ok || spec["output_path"] != outputPath || spec["script_path"] != script {
+		t.Fatalf("parse_documents spec = %#v", job["spec"])
+	}
+
+	restartedRoutes := svc.NewService(cfg).Routes()
+	loaded := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID, nil))
+	if loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), `"type":"parse_documents"`) || !strings.Contains(loaded.Body.String(), `"status":"written"`) {
+		t.Fatalf("loaded parse_documents job status = %d, body = %s", loaded.Code, loaded.Body.String())
 	}
 }
 

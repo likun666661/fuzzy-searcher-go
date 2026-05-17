@@ -159,23 +159,24 @@ curl -s -X POST http://127.0.0.1:8080/v1/workflows/<workflow_id>/cancel
 ```
 
 The same job envelope also supports Python-backed long-running workers for
-golden generation, graph construction, and final answer generation. The Go
-service owns job status, persistence, artifacts, and worker process execution;
-Python keeps the model-heavy logic:
+document parsing, golden generation, graph construction, and final answer
+generation. The Go service owns job status, persistence, artifacts, and worker
+process execution; Python keeps the model-heavy logic:
 
 ```bash
 curl -s http://127.0.0.1:8080/v1/jobs \
   -H 'content-type: application/json' \
   -d '{
-    "type": "answer",
-    "answer": {
-      "dataset": "demo",
-      "question": "Who signed with Barcelona?",
-      "mode": "noagent",
-      "top_k": 20
+    "type": "parse_documents",
+    "parse_documents": {
+      "dataset": "news_2026",
+      "document_paths": ["/abs/path/incoming/a.pdf"]
     }
   }'
 ```
+
+Other job types use the same endpoint: `retrieve`, `generate_golden`,
+`build_graph`, and `answer`.
 
 Dataset and artifact registry endpoints report what the service can see:
 
