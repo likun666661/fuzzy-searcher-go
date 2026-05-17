@@ -190,6 +190,60 @@ path1_keyword_count = 14
 
 这一步以前是 Python `/v1/retrieval/path1-triples` 做的，现在已经是 Go 做。
 
+#### path1 再讲细一点
+
+path1 的思路是“先找点，再沿着点附近找边”。
+
+继续用图书馆类比：如果用户问的是梅西和国王杯，那么 path1 会先在目录里
+找到可能相关的卡片，比如：
+
+- Lionel Messi
+- Copa del Rey
+- FC Barcelona
+- Diego Maradona
+- 一些比赛、球队、事件、属性节点
+
+找到这些卡片之后，它不会马上输出答案，而是把这些卡片附近的关系都先拿出来
+当候选。
+
+path1 具体分三种候选来源。
+
+第一种是 neighbor expansion，也就是“一跳邻居”。
+
+如果图里有：
+
+```text
+Lionel Messi -- participates_in --> Gerard Piqué
+Lionel Messi -- has_attribute --> defeated: FC Barcelona
+Lionel Messi -- comparable_to --> Diego Maradona's goal
+```
+
+只要 `Lionel Messi` 是相关节点，这些边就可能被拿出来。
+
+第二种是 path-based search，也就是“沿着路走一小段”。
+
+有时候答案不在相关节点的第一条边上，而是在从这个点走出去的一条短路径里。
+path1 会从相关节点出发，最多走几步，看路径上的节点文本是否命中问题里的关键词。
+如果命中，就把路径里的边也拿出来当候选。
+
+第三种是 relation-matched search，也就是“按关系词找边”。
+
+如果问题里或者 relation FAISS 里认为 `belongs_to`、`participates_in`、
+`comparable_to` 这类关系可能重要，那么 Go 会在 graph 里找这些关系对应的边。
+但它不会全图乱拿，要求边的两端至少有一个靠近前面找到的相关节点。
+
+这三种来源会合在一起，然后去重。去重后的结果叫 raw triples。
+
+raw triples 的特点是：
+
+- 它们还没有最终分数。
+- 它们只是“候选资料卡片”。
+- 它们可能有一些不重要的边。
+- 所以后面必须 rerank。
+
+当前 Phase 9 中，这一步已经由 Go 完成。Python 不再负责 path1 candidate
+generation。
+
 ### 第 4 步：Python 只负责给 path1 candidates 打分
 
 Go 把 raw triples 发给：
@@ -231,6 +285,57 @@ Python 返回 `rescored_triples`。
 path2_count = 20
 ```
 
+#### path2 再讲细一点
+
+path2 和 path1 最大的区别是：path1 先找节点，path2 先找 triple。
+
+还是图书馆类比：
+
+- path1 像先找“梅西”这张人物卡，再看这张卡旁边连着哪些资料。
+- path2 像直接在“所有关系句子”的索引里搜，看哪几句关系句子本身最像问题。
+
+所谓 triple，可以理解成一条关系句子：
+
+```text
+头节点 -- 关系 -- 尾节点
+```
+
+比如：
+
+```text
+Lionel Messi -- comparable_to -- Diego Maradona's goal
+Copa del Rey -- has_attribute -- achievement: first club in Spain to win the treble
+Jesús Aranguren -- participates_in -- Copa del Rey
+```
+
+Python sidecar 里有一个 triple 向量索引。它会把每条 triple 也变成向量。
+用户问题来了之后，path2 会做几件事：
+
+1. 把问题变成 query vector。
+2. 去 triple FAISS index 里查最像这个问题的 triples。
+3. 对查到的 triples 做 expansion。
+4. 对 expansion 后的候选重新计算分数。
+5. 返回分数排好序的 `rescored_triples`。
+
+这里的 expansion 很重要。它不是只拿 FAISS 命中的那几条 triple，而是会看命中
+triple 的头尾节点附近还有哪些相关 triple。原因是：
+
+如果只看一条命中的 triple，可能资料太窄；扩展一下邻居，可能会找到真正回答
+问题需要的上下文。
+
+所以 path2 更像“直接从关系句子索引里找线索，然后顺着线索附近再捞一圈”。
+
+这就是为什么 path2 现在还留在 Python：它不只是一个简单的图邻居查询，还绑定了
+triple FAISS index、向量重排、候选扩展、threshold filter、cache 等细节。
+
+当前 Go 拿到的是 Python 已经处理好的：
+
+```text
+path2-triples/v1.rescored_triples
+```
+
+Go 不需要知道 Python 内部怎么算的，只要按 contract 合并它。
+
 ### 第 6 步：Go 合并 path1 和 path2
 
 Go 拿到两批结果：
@@ -249,6 +354,29 @@ Go 拿到两批结果：
 7. 拼出最终 `RetrieveResult`。
 
 这部分已经在 Go。
+
+#### 为什么需要 path1 和 path2 两路
+
+因为它们擅长的事情不一样。
+
+path1 擅长“从相关实体附近找资料”。如果问题明确提到一个人、球队、比赛，
+path1 很适合从这些节点往外扩。
+
+path2 擅长“直接找语义相似的关系句子”。如果某条 triple 本身和问题很像，
+path2 可以直接命中，即使它不在最明显的相关节点旁边。
+
+两路合起来更稳：
+
+- path1 提供图结构附近的召回。
+- path2 提供向量语义上的召回。
+- rerank/rescore 给它们分数。
+- Go 最后统一排序。
+
+可以把它想成两个人找资料：
+
+- 第一个人按目录卡片找。
+- 第二个人按句子意思找。
+- 最后让 Go 这个整理员把两个人找到的资料合并，按可信度排好。
 
 ### 第 7 步：Go 输出稳定 JSON
 
@@ -559,4 +687,3 @@ Makefile
 如果以后要继续迁，应该把目标改成“生产上去掉 Python runtime”，然后再
 按 embedding、FAISS、rerank、path2 的顺序推进。不要为了“全 Go”而继续迁，
 否则会把学习架构的问题变成模型基础设施迁移问题。
-
