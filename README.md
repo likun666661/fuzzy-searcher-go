@@ -61,6 +61,7 @@ It currently exposes the first service milestone:
 - `GET /readyz`
 - `GET /v1/version`
 - `GET /v1/datasets`
+- `POST /v1/datasets/import`
 - `GET /v1/datasets/{dataset}`
 - `GET /v1/datasets/{dataset}/artifacts`
 - `GET /v1/sidecars`
@@ -182,6 +183,23 @@ Dataset and artifact registry endpoints report what the service can see:
 curl -s http://127.0.0.1:8080/v1/datasets
 curl -s http://127.0.0.1:8080/v1/datasets/demo/artifacts
 ```
+
+To import a prepared corpus/schema pair into service-managed artifact roots:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/datasets/import \
+  -H 'content-type: application/json' \
+  -d '{
+    "dataset": "news_2026",
+    "corpus_path": "/abs/path/incoming/corpus.json",
+    "schema_path": "/abs/path/incoming/schema.json"
+  }'
+```
+
+The import copies files into `data/uploaded/<dataset>/corpus.json` and
+`schemas/<dataset>.json`, writes `dataset-import/v1` metadata under
+`output/datasets`, and makes the dataset visible to existing registry and
+`build_graph` paths. See `docs/contracts/dataset_import.md`.
 
 By default the registry looks for a sibling `../youtu-graphrag` checkout. In a
 clean clone elsewhere, set `YOUTU_RAG_ARTIFACT_ROOT` or the individual root

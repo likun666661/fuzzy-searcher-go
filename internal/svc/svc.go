@@ -12,6 +12,7 @@ import (
 
 	"github.com/fuzzy-searcher-go/internal/artifacts"
 	"github.com/fuzzy-searcher-go/internal/config"
+	"github.com/fuzzy-searcher-go/internal/datasetimport"
 	"github.com/fuzzy-searcher-go/internal/jobs"
 	"github.com/fuzzy-searcher-go/internal/orchestrator"
 	"github.com/fuzzy-searcher-go/internal/sidecarstatus"
@@ -49,6 +50,7 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("GET /v1/version", s.handleVersion)
 	mux.HandleFunc("GET /v1/datasets", s.handleDatasets)
+	mux.HandleFunc("POST /v1/datasets/import", s.handleImportDataset)
 	mux.HandleFunc("GET /v1/datasets/{dataset}", s.handleDataset)
 	mux.HandleFunc("GET /v1/datasets/{dataset}/artifacts", s.handleDatasetArtifacts)
 	mux.HandleFunc("GET /v1/sidecars", s.handleSidecars)
@@ -126,6 +128,20 @@ func (s *Service) handleDatasets(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"datasets": registry.List(),
 	})
+}
+
+func (s *Service) handleImportDataset(w http.ResponseWriter, r *http.Request) {
+	var input datasetimport.Request
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err)
+		return
+	}
+	metadata, err := datasetimport.Import(s.config, input)
+	if err != nil {
+		writeDatasetImportError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, metadata)
 }
 
 func (s *Service) handleDataset(w http.ResponseWriter, r *http.Request) {
@@ -930,4 +946,15 @@ func writeWorkflowError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, "workflow_failed", err)
+}
+
+func writeDatasetImportError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, datasetimport.ErrInvalidDataset):
+		writeError(w, http.StatusBadRequest, "invalid_dataset", err)
+	case errors.Is(err, datasetimport.ErrAlreadyExists):
+		writeError(w, http.StatusConflict, "dataset_exists", err)
+	default:
+		writeError(w, http.StatusBadRequest, "dataset_import_failed", err)
+	}
 }

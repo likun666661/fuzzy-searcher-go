@@ -48,6 +48,9 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	if cfg.JobRoot != "/tmp/youtu-jobs" {
 		t.Fatalf("job root = %q", cfg.JobRoot)
 	}
+	if cfg.DatasetMetaRoot != filepath.Join("/tmp/youtu", "output", "datasets") {
+		t.Fatalf("dataset meta root = %q", cfg.DatasetMetaRoot)
+	}
 	if cfg.WorkflowRoot != filepath.Join("/tmp/youtu", "output", "workflows") {
 		t.Fatalf("workflow root = %q", cfg.WorkflowRoot)
 	}

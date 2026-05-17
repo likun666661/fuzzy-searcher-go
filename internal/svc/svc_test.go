@@ -115,6 +115,81 @@ func TestDatasetEndpoints(t *testing.T) {
 	}
 }
 
+func TestDatasetImportEndpoint(t *testing.T) {
+	root := t.TempDir()
+	sourceCorpus := filepath.Join(root, "incoming", "corpus.json")
+	sourceSchema := filepath.Join(root, "incoming", "schema.json")
+	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
+	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	cfg := config.Config{
+		ArtifactRoot:    root,
+		DefaultDataset:  "demo",
+		CorpusRoot:      filepath.Join(root, "data"),
+		SchemaRoot:      filepath.Join(root, "schemas"),
+		GraphRoot:       filepath.Join(root, "output", "graphs"),
+		ChunksRoot:      filepath.Join(root, "output", "chunks"),
+		CacheRoot:       filepath.Join(root, "retriever", "faiss_cache_new"),
+		GoldenRoot:      filepath.Join(root, "output", "retrieval_golden"),
+		TraceRoot:       filepath.Join(root, "output", "retrieval_traces"),
+		DatasetMetaRoot: filepath.Join(root, "output", "datasets"),
+		DatasetNames:    []string{"demo"},
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	body := bytes.NewBufferString(`{"dataset":"imported","corpus_path":` + quote(sourceCorpus) + `,"schema_path":` + quote(sourceSchema) + `}`)
+	created := httptest.NewRecorder()
+	routes.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", body))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("import status = %d, body = %s", created.Code, created.Body.String())
+	}
+	for _, want := range []string{
+		`"schema_version":"dataset-import/v1"`,
+		`"dataset":"imported"`,
+		`"status":"imported"`,
+		`"name":"corpus"`,
+		`"name":"schema"`,
+		`"name":"metadata"`,
+	} {
+		if !strings.Contains(created.Body.String(), want) {
+			t.Fatalf("import body missing %s: %s", want, created.Body.String())
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(root, "data", "uploaded", "imported", "corpus.json"),
+		filepath.Join(root, "schemas", "imported.json"),
+		filepath.Join(root, "output", "datasets", "imported.json"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("import artifact missing %s: %v", path, err)
+		}
+	}
+
+	list := httptest.NewRecorder()
+	routes.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/datasets", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"name":"imported"`) || !strings.Contains(list.Body.String(), `"status":"schema_ready"`) {
+		t.Fatalf("datasets after import status = %d, body = %s", list.Code, list.Body.String())
+	}
+
+	restartedRoutes := svc.NewService(cfg).Routes()
+	loaded := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/datasets/imported/artifacts", nil))
+	if loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), `"name":"metadata"`) || !strings.Contains(loaded.Body.String(), `"exists":true`) {
+		t.Fatalf("loaded import artifacts status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+
+	duplicate := httptest.NewRecorder()
+	routes.ServeHTTP(duplicate, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"imported","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
+	if duplicate.Code != http.StatusConflict || !strings.Contains(duplicate.Body.String(), "dataset_exists") {
+		t.Fatalf("duplicate import status = %d, body = %s", duplicate.Code, duplicate.Body.String())
+	}
+	invalid := httptest.NewRecorder()
+	routes.ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"../bad","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "invalid_dataset") {
+		t.Fatalf("invalid import status = %d, body = %s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestReadyzReportsMissingRetrievalArtifacts(t *testing.T) {
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, "data", "demo", "demo_corpus.json"), "{}")

@@ -28,8 +28,28 @@ func TestRegistryDiscoversDatasetAndStatus(t *testing.T) {
 	if dataset.Name != "demo" || dataset.Status != "retrieval_ready" || !dataset.RetrievalReady {
 		t.Fatalf("dataset = %#v", dataset)
 	}
-	if len(dataset.Artifacts) != 7 {
+	if len(dataset.Artifacts) != 8 {
 		t.Fatalf("artifacts = %#v", dataset.Artifacts)
+	}
+}
+
+func TestRegistryDiscoversImportedDatasetMetadata(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "output", "datasets", "imported.json"), "{}")
+
+	registry := artifacts.NewRegistry(testConfig(root, nil))
+	datasets := registry.List()
+	if len(datasets) != 1 || datasets[0].Name != "imported" || datasets[0].Status != "empty" {
+		t.Fatalf("datasets = %#v", datasets)
+	}
+	foundMetadata := false
+	for _, artifact := range datasets[0].Artifacts {
+		if artifact.Name == "metadata" && artifact.Exists {
+			foundMetadata = true
+		}
+	}
+	if !foundMetadata {
+		t.Fatalf("metadata artifact not found: %#v", datasets[0].Artifacts)
 	}
 }
 
@@ -54,6 +74,7 @@ func TestRegistryReportsMissingRetrievalArtifacts(t *testing.T) {
 
 func testConfig(root string, names []string) config.Config {
 	return config.Config{
+		ArtifactRoot:   root,
 		DefaultDataset: "demo",
 		CorpusRoot:     filepath.Join(root, "data"),
 		SchemaRoot:     filepath.Join(root, "schemas"),

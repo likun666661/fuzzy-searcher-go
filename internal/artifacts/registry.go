@@ -71,6 +71,7 @@ func (r *Registry) Artifacts(name string) []Artifact {
 		r.artifact("cache", filepath.Join(r.config.CacheRoot, name), "dir", true),
 		r.artifact("golden", filepath.Join(r.config.GoldenRoot, name+".json"), "file", false),
 		r.artifact("triple_trace", filepath.Join(r.config.TraceRoot, name+"_triple_trace.json"), "file", false),
+		r.artifact("metadata", filepath.Join(datasetMetaRoot(r.config), name+".json"), "file", false),
 	}
 }
 
@@ -120,6 +121,7 @@ func (r *Registry) discoverDatasetNames() []string {
 	addBaseNames(names, r.config.SchemaRoot, ".json", "")
 	addBaseNames(names, r.config.GraphRoot, "_new.json", "")
 	addBaseNames(names, r.config.ChunksRoot, ".txt", "")
+	addBaseNames(names, datasetMetaRoot(r.config), ".json", "")
 	addCorpusNames(names, r.config.CorpusRoot)
 
 	out := make([]string, 0, len(names))
@@ -128,6 +130,13 @@ func (r *Registry) discoverDatasetNames() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func datasetMetaRoot(cfg config.Config) string {
+	if cfg.DatasetMetaRoot != "" {
+		return cfg.DatasetMetaRoot
+	}
+	return filepath.Join(cfg.ArtifactRoot, "output", "datasets")
 }
 
 func addBaseNames(names map[string]struct{}, root string, suffix string, prefix string) {
