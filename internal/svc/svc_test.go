@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fuzzy-searcher-go/internal/config"
 	"github.com/fuzzy-searcher-go/internal/svc"
@@ -327,8 +328,90 @@ func TestRetrieveNative(t *testing.T) {
 	}
 }
 
+func TestRetrieveJobLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	graphPath, chunksPath := writeTinyGraphAndChunks(t, dir)
+
+	service := svc.NewService(config.Config{})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"retrieve","retrieve":{"graph_path":` + quote(graphPath) + `,"chunks_path":` + quote(chunksPath) + `,"question":"Alice","mode":"native","top_k":5}}`)
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatalf("create job missing id: %s", create.Body.String())
+	}
+
+	job := waitForServiceJob(t, routes, created.ID, "succeeded")
+	result, ok := job["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("job missing result: %#v", job)
+	}
+	triples, ok := result["triples"].([]any)
+	if !ok || len(triples) == 0 {
+		t.Fatalf("job result missing triples: %#v", result)
+	}
+
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"retrieve_started"`) || !strings.Contains(events.Body.String(), `"succeeded"`) {
+		t.Fatalf("events body = %s", events.Body.String())
+	}
+}
+
+func TestJobValidation(t *testing.T) {
+	service := svc.NewService(config.Config{})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"unknown"}`)))
+	if create.Code != http.StatusBadRequest {
+		t.Fatalf("create invalid job status = %d, body = %s", create.Code, create.Body.String())
+	}
+
+	missing := httptest.NewRecorder()
+	routes.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/v1/jobs/missing", nil))
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing job status = %d, body = %s", missing.Code, missing.Body.String())
+	}
+}
+
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+}
+
+func waitForServiceJob(t *testing.T, routes http.Handler, id string, want string) map[string]any {
+	t.Helper()
+	for attempt := 0; attempt < 200; attempt++ {
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+id, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("job status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var job map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil {
+			t.Fatalf("decode job: %v", err)
+		}
+		if job["status"] == want {
+			return job
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not reach %s", id, want)
+	return nil
 }
 
 func writeTinyGraphAndChunks(t *testing.T, dir string) (string, string) {

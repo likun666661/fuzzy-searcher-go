@@ -63,6 +63,10 @@ It currently exposes the first service milestone:
 - `GET /v1/sidecars`
 - `GET /v1/sidecars/vector/health`
 - `POST /v1/retrieve`
+- `POST /v1/jobs`
+- `GET /v1/jobs/{job_id}`
+- `GET /v1/jobs/{job_id}/events`
+- `POST /v1/jobs/{job_id}/cancel`
 
 Run it with explicit demo artifacts:
 
@@ -85,6 +89,31 @@ curl -s http://127.0.0.1:8080/v1/retrieve \
     "question": "When was the person who Messi'\''s goals in Copa del Rey compared to get signed by Barcelona?",
     "top_k": 20
   }'
+```
+
+For longer-running workflows, submit the same retrieve request as an async job.
+The first skeleton is process-local and in-memory; it is meant to lock the
+service contract before adding durable queues or external workers:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/jobs \
+  -H 'content-type: application/json' \
+  -d '{
+    "type": "retrieve",
+    "retrieve": {
+      "dataset": "demo",
+      "question": "When was the person who Messi'\''s goals in Copa del Rey compared to get signed by Barcelona?",
+      "top_k": 20
+    }
+  }'
+```
+
+Then inspect the job and its event stream:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/jobs/<job_id>
+curl -s http://127.0.0.1:8080/v1/jobs/<job_id>/events
+curl -s -X POST http://127.0.0.1:8080/v1/jobs/<job_id>/cancel
 ```
 
 Dataset and artifact registry endpoints report what the service can see:

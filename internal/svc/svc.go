@@ -1,6 +1,7 @@
 package svc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/fuzzy-searcher-go/internal/artifacts"
 	"github.com/fuzzy-searcher-go/internal/config"
+	"github.com/fuzzy-searcher-go/internal/jobs"
 	"github.com/fuzzy-searcher-go/internal/orchestrator"
 	"github.com/fuzzy-searcher-go/internal/sidecarstatus"
 )
@@ -19,6 +21,7 @@ import (
 type Service struct {
 	config    config.Config
 	retriever *orchestrator.Retriever
+	jobs      *jobs.Manager
 }
 
 // NewService constructs the service layer.
@@ -26,6 +29,7 @@ func NewService(config config.Config) *Service {
 	return &Service{
 		config:    config,
 		retriever: orchestrator.NewRetriever(config),
+		jobs:      jobs.NewManager(),
 	}
 }
 
@@ -41,6 +45,10 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/sidecars", s.handleSidecars)
 	mux.HandleFunc("GET /v1/sidecars/vector/health", s.handleVectorSidecarHealth)
 	mux.HandleFunc("POST /v1/retrieve", s.handleRetrieve)
+	mux.HandleFunc("POST /v1/jobs", s.handleCreateJob)
+	mux.HandleFunc("GET /v1/jobs/{job_id}", s.handleJob)
+	mux.HandleFunc("GET /v1/jobs/{job_id}/events", s.handleJobEvents)
+	mux.HandleFunc("POST /v1/jobs/{job_id}/cancel", s.handleCancelJob)
 	return mux
 }
 
@@ -165,6 +173,64 @@ func (s *Service) handleRetrieve(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+type createJobRequest struct {
+	Type     string                     `json:"type"`
+	Retrieve orchestrator.RetrieveInput `json:"retrieve,omitempty"`
+}
+
+func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
+	var input createJobRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err)
+		return
+	}
+	switch input.Type {
+	case "retrieve":
+		job := s.jobs.Submit(input.Type, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+			recorder.Event("retrieve_started", "retrieve request started")
+			return s.retriever.Retrieve(ctx, input.Retrieve)
+		})
+		writeJSON(w, http.StatusAccepted, job)
+	case "":
+		writeError(w, http.StatusBadRequest, "invalid_job_type", fmt.Errorf("type is required"))
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_job_type", fmt.Errorf("unsupported job type %q", input.Type))
+	}
+}
+
+func (s *Service) handleJob(w http.ResponseWriter, r *http.Request) {
+	job, err := s.jobs.Get(r.PathValue("job_id"))
+	if err != nil {
+		writeJobError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, job)
+}
+
+func (s *Service) handleJobEvents(w http.ResponseWriter, r *http.Request) {
+	events, err := s.jobs.Events(r.PathValue("job_id"))
+	if err != nil {
+		writeJobError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"job_id": r.PathValue("job_id"),
+		"events": events,
+	})
+}
+
+func (s *Service) handleCancelJob(w http.ResponseWriter, r *http.Request) {
+	job, canceled, err := s.jobs.Cancel(r.PathValue("job_id"))
+	if err != nil {
+		writeJobError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"canceled": canceled,
+		"job":      job,
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -178,4 +244,12 @@ func writeError(w http.ResponseWriter, status int, code string, err error) {
 			"message": err.Error(),
 		},
 	})
+}
+
+func writeJobError(w http.ResponseWriter, err error) {
+	if errors.Is(err, jobs.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "job_not_found", err)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "job_failed", err)
 }
