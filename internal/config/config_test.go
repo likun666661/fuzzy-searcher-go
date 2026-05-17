@@ -54,6 +54,9 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	if cfg.GoldenScript != filepath.Join("/tmp/youtu", "scripts", "generate_retriever_golden.py") {
 		t.Fatalf("golden script = %q", cfg.GoldenScript)
 	}
+	if cfg.BuildGraphScript != filepath.Join("/tmp/youtu", "scripts", "build_graph_worker.py") {
+		t.Fatalf("build graph script = %q", cfg.BuildGraphScript)
+	}
 	if cfg.WorkerCWD != "/tmp/youtu" {
 		t.Fatalf("worker cwd = %q", cfg.WorkerCWD)
 	}

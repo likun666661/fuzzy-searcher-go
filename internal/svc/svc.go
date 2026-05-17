@@ -15,6 +15,7 @@ import (
 	"github.com/fuzzy-searcher-go/internal/jobs"
 	"github.com/fuzzy-searcher-go/internal/orchestrator"
 	"github.com/fuzzy-searcher-go/internal/sidecarstatus"
+	"github.com/fuzzy-searcher-go/internal/workers/buildgraph"
 	"github.com/fuzzy-searcher-go/internal/workers/golden"
 )
 
@@ -179,6 +180,7 @@ type createJobRequest struct {
 	Type           string                     `json:"type"`
 	Retrieve       orchestrator.RetrieveInput `json:"retrieve,omitempty"`
 	GenerateGolden jobs.GenerateGoldenSpec    `json:"generate_golden,omitempty"`
+	BuildGraph     jobs.BuildGraphSpec        `json:"build_graph,omitempty"`
 }
 
 func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
@@ -218,6 +220,35 @@ func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 				recorder.Artifact("golden_fixture", "missing", "")
 			} else {
 				recorder.Artifact("golden_fixture", "failed", "")
+			}
+			return result, err
+		})
+		writeJSON(w, http.StatusAccepted, job)
+	case jobs.TypeBuildGraph:
+		spec := s.buildGraphSpec(input.BuildGraph)
+		artifacts := buildGraphArtifacts(spec)
+		job := s.jobs.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+			recorder.Event("worker_started", "build_graph Python worker started")
+			recorder.Artifact("graph", "running", "")
+			recorder.Artifact("chunks", "running", "")
+			result, err := buildgraph.Run(ctx, buildgraph.Config{
+				PythonBin:  spec.PythonBin,
+				ScriptPath: spec.ScriptPath,
+				WorkingDir: spec.WorkingDir,
+			}, spec)
+			if err == nil {
+				recorder.Artifact("graph", "written", result.GraphOutputPath)
+				recorder.Artifact("chunks", "written", result.ChunksOutputPath)
+				if result.CacheDir != "" {
+					recorder.Artifact("cache", "written", result.CacheDir)
+				}
+				recorder.Event("artifact_graph_written", "graph and chunks artifacts written")
+			} else if errors.Is(err, buildgraph.ErrMissingOutput) {
+				recorder.Artifact("graph", "missing", "")
+				recorder.Artifact("chunks", "missing", "")
+			} else {
+				recorder.Artifact("graph", "failed", "")
+				recorder.Artifact("chunks", "failed", "")
 			}
 			return result, err
 		})
@@ -315,6 +346,96 @@ func generateGoldenArtifacts(spec jobs.GenerateGoldenSpec) []jobs.Artifact {
 			Path:          spec.OutputPath,
 			Status:        "pending",
 			Description:   "Python retriever golden fixture written by generate_golden worker.",
+		},
+	}
+}
+
+func (s *Service) buildGraphSpec(input jobs.BuildGraphSpec) jobs.BuildGraphSpec {
+	spec := input
+	if spec.Dataset == "" {
+		spec.Dataset = s.config.DefaultDataset
+	}
+	if spec.Dataset == "" {
+		spec.Dataset = "demo"
+	}
+	artifactPaths := map[string]string{}
+	for _, artifact := range artifacts.NewRegistry(s.config).Artifacts(spec.Dataset) {
+		artifactPaths[artifact.Name] = artifact.Path
+	}
+	if spec.CorpusPath == "" {
+		spec.CorpusPath = artifactPaths["corpus"]
+	}
+	if spec.SchemaPath == "" {
+		spec.SchemaPath = artifactPaths["schema"]
+	}
+	if spec.GraphOutputPath == "" {
+		spec.GraphOutputPath = artifactPaths["graph"]
+	}
+	if spec.ChunksOutputPath == "" {
+		spec.ChunksOutputPath = artifactPaths["chunks"]
+	}
+	if spec.CacheDir == "" {
+		spec.CacheDir = artifactPaths["cache"]
+	}
+	if spec.PythonBin == "" {
+		spec.PythonBin = s.config.PythonBin
+	}
+	if spec.ScriptPath == "" {
+		spec.ScriptPath = s.config.BuildGraphScript
+	}
+	if spec.WorkingDir == "" {
+		spec.WorkingDir = s.config.WorkerCWD
+	}
+	return spec
+}
+
+func buildGraphArtifacts(spec jobs.BuildGraphSpec) []jobs.Artifact {
+	return []jobs.Artifact{
+		{
+			Name:        "corpus",
+			Role:        "input",
+			Kind:        "corpus_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.CorpusPath,
+			Status:      "configured",
+			Description: "Corpus JSON consumed by the build_graph worker.",
+		},
+		{
+			Name:        "schema",
+			Role:        "input",
+			Kind:        "schema_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.SchemaPath,
+			Status:      "configured",
+			Description: "Schema JSON consumed by the build_graph worker.",
+		},
+		{
+			Name:          "graph",
+			Role:          "output",
+			Kind:          "graph_json",
+			SchemaVersion: "youtu-graph/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.GraphOutputPath,
+			Status:        "pending",
+			Description:   "Knowledge graph JSON written by the build_graph worker.",
+		},
+		{
+			Name:        "chunks",
+			Role:        "output",
+			Kind:        "chunks_txt",
+			Dataset:     spec.Dataset,
+			Path:        spec.ChunksOutputPath,
+			Status:      "pending",
+			Description: "Chunk text file written by the build_graph worker.",
+		},
+		{
+			Name:        "cache",
+			Role:        "output",
+			Kind:        "faiss_cache_dir",
+			Dataset:     spec.Dataset,
+			Path:        spec.CacheDir,
+			Status:      "pending",
+			Description: "Vector cache directory prepared for retrieval indexing.",
 		},
 	}
 }

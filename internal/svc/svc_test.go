@@ -683,6 +683,175 @@ print("ok but did not write output")
 	}
 }
 
+func TestBuildGraphJobLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	corpusPath := filepath.Join(dir, "data", "demo", "demo_corpus.json")
+	schemaPath := filepath.Join(dir, "schemas", "demo.json")
+	graphPath := filepath.Join(dir, "output", "graphs", "demo_new.json")
+	chunksPath := filepath.Join(dir, "output", "chunks", "demo.txt")
+	cacheDir := filepath.Join(dir, "retriever", "faiss_cache_new", "demo")
+	mustWrite(t, corpusPath, "[]")
+	mustWrite(t, schemaPath, "{}")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import json
+import os
+import sys
+dataset = sys.argv[sys.argv.index("--dataset") + 1]
+graph = sys.argv[sys.argv.index("--graph-output") + 1]
+chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
+cache = sys.argv[sys.argv.index("--cache-dir") + 1]
+os.makedirs(os.path.dirname(graph), exist_ok=True)
+os.makedirs(os.path.dirname(chunks), exist_ok=True)
+os.makedirs(cache, exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    json.dump([], f)
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: c1\tChunk: hello\n")
+print(json.dumps({"ok": True, "dataset": dataset, "graph": graph, "chunks": chunks}))
+`)
+
+	cfg := config.Config{
+		DefaultDataset:   "demo",
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		PythonBin:        "python3",
+		BuildGraphScript: scriptPath,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"build_graph","build_graph":{"dataset":"demo"}}`)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	for _, want := range []string{
+		`"type":"build_graph"`,
+		`"schema_version":"service-job/v1"`,
+		`"name":"corpus"`,
+		`"name":"schema"`,
+		`"name":"graph"`,
+		`"name":"chunks"`,
+		`"name":"cache"`,
+		`"status":"pending"`,
+	} {
+		if !strings.Contains(create.Body.String(), want) {
+			t.Fatalf("create job missing %s: %s", want, create.Body.String())
+		}
+	}
+	var createdJob map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &createdJob); err != nil {
+		t.Fatalf("decode created build_graph job: %v", err)
+	}
+	spec, ok := createdJob["spec"].(map[string]any)
+	if !ok ||
+		spec["dataset"] != "demo" ||
+		spec["corpus_path"] != corpusPath ||
+		spec["schema_path"] != schemaPath ||
+		spec["graph_output_path"] != graphPath ||
+		spec["chunks_output_path"] != chunksPath ||
+		spec["cache_dir"] != cacheDir ||
+		spec["python_bin"] != "python3" ||
+		spec["script_path"] != scriptPath ||
+		spec["working_dir"] != dir {
+		t.Fatalf("created build_graph spec = %#v", createdJob["spec"])
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "succeeded")
+	result, ok := job["result"].(map[string]any)
+	if !ok || result["schema_version"] != "build-graph-result/v1" {
+		t.Fatalf("job result = %#v", job["result"])
+	}
+	for _, name := range []string{"graph", "chunks", "cache"} {
+		if !containsArtifactStatus(job, name, "written") {
+			t.Fatalf("job artifact %s not written: %#v", name, job["artifacts"])
+		}
+	}
+	if _, err := os.Stat(graphPath); err != nil {
+		t.Fatalf("graph output missing: %v", err)
+	}
+	if _, err := os.Stat(chunksPath); err != nil {
+		t.Fatalf("chunks output missing: %v", err)
+	}
+
+	restarted := svc.NewService(cfg)
+	restartedRoutes := restarted.Routes()
+	loaded := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID, nil))
+	if loaded.Code != http.StatusOK {
+		t.Fatalf("loaded job status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+	if !strings.Contains(loaded.Body.String(), `"status":"succeeded"`) ||
+		!strings.Contains(loaded.Body.String(), `"status":"written"`) {
+		t.Fatalf("loaded job body = %s", loaded.Body.String())
+	}
+	events := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("loaded events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"worker_started"`) ||
+		!strings.Contains(events.Body.String(), `"artifact_graph_written"`) ||
+		!strings.Contains(events.Body.String(), `"succeeded"`) {
+		t.Fatalf("loaded events body = %s", events.Body.String())
+	}
+}
+
+func TestBuildGraphJobMissingOutputMarksArtifactsMissing(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+print("ok but did not write graph or chunks")
+`)
+
+	service := svc.NewService(config.Config{
+		DefaultDataset:   "demo",
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		PythonBin:        "python3",
+		BuildGraphScript: scriptPath,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"build_graph","build_graph":{"dataset":"demo"}}`)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "failed")
+	if errorText, _ := job["error"].(string); !strings.Contains(errorText, "build graph output missing") {
+		t.Fatalf("job error = %#v", job["error"])
+	}
+	if !containsArtifactStatus(job, "graph", "missing") || !containsArtifactStatus(job, "chunks", "missing") {
+		t.Fatalf("job artifacts not missing: %#v", job["artifacts"])
+	}
+}
+
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }

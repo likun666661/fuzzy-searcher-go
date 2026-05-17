@@ -33,8 +33,8 @@ Stable fields:
 
 - `schema_version`: job envelope version. Current value is `service-job/v1`.
 - `id`: service-assigned job id.
-- `type`: job type. Current implemented types are `retrieve` and
-  `generate_golden`.
+- `type`: job type. Current implemented types are `retrieve`,
+  `generate_golden`, and `build_graph`.
 - `status`: one of `queued`, `running`, `succeeded`, `failed`, `canceled`.
 - `spec`: typed request payload for the job type.
 - `artifacts`: input/output artifact metadata.
@@ -193,12 +193,68 @@ on disk as the `golden_fixture` artifact.
 The detailed Python worker command contract is defined in
 `docs/contracts/generate_golden_worker.md`.
 
+## Implemented Job: build_graph
+
+`build_graph` turns Python graph construction into a tracked service job. Go
+owns the job envelope, lifecycle events, persistence, worker command execution,
+stdout/stderr capture, and artifact metadata. Python continues to own chunking,
+LLM extraction, schema-aware graph construction, and graph/chunk file writing.
+
+Submit:
+
+```json
+{
+  "type": "build_graph",
+  "build_graph": {
+    "dataset": "demo",
+    "corpus_path": "/abs/path/youtu-graphrag/data/demo/demo_corpus.json",
+    "schema_path": "/abs/path/youtu-graphrag/schemas/demo.json",
+    "graph_output_path": "/abs/path/youtu-graphrag/output/graphs/demo_new.json",
+    "chunks_output_path": "/abs/path/youtu-graphrag/output/chunks/demo.txt",
+    "cache_dir": "/abs/path/youtu-graphrag/retriever/faiss_cache_new/demo"
+  }
+}
+```
+
+The service stores this as a typed `BuildGraphSpec` in `job.spec`. The resolved
+worker command fields are persisted with the job:
+
+```json
+{
+  "dataset": "demo",
+  "corpus_path": "/abs/path/youtu-graphrag/data/demo/demo_corpus.json",
+  "schema_path": "/abs/path/youtu-graphrag/schemas/demo.json",
+  "graph_output_path": "/abs/path/youtu-graphrag/output/graphs/demo_new.json",
+  "chunks_output_path": "/abs/path/youtu-graphrag/output/chunks/demo.txt",
+  "cache_dir": "/abs/path/youtu-graphrag/retriever/faiss_cache_new/demo",
+  "python_bin": "/abs/path/youtu-graphrag/.venv/bin/python",
+  "script_path": "/abs/path/youtu-graphrag/scripts/build_graph_worker.py",
+  "working_dir": "/abs/path/youtu-graphrag"
+}
+```
+
+`build_graph` jobs report these artifacts:
+
+- `corpus`: input `corpus_json`, status `configured`.
+- `schema`: input `schema_json`, status `configured`.
+- `graph`: output `graph_json`, `schema_version=youtu-graph/v1`, starts
+  `pending`, moves to `written`.
+- `chunks`: output `chunks_txt`, starts `pending`, moves to `written`.
+- `cache`: output `faiss_cache_dir`, starts `pending`, moves to `written`
+  when prepared by the runner.
+
+Completed jobs return a small inline `build-graph-result/v1` result with
+dataset, graph output path, chunks output path, cache dir, and captured
+stdout/stderr. The large graph/chunks artifacts remain on disk.
+
+The detailed Python worker command contract is defined in
+`docs/contracts/build_graph_worker.md`.
+
 ## Planned Job Types
 
 These types are named now so later work can extend the same contract instead of
 inventing a new shape:
 
-- `build_graph`: long-running Python graph construction worker.
 - `answer`: retrieval plus decomposition/LLM answer generation.
 
 The first implementation may return `unsupported job type` for these until the

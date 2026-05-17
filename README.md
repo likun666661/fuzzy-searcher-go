@@ -316,6 +316,8 @@ should be `go_path1_rerank_path2_primitive_merge`.
 The retrieval output schema is tracked in
 `docs/contracts/retrieve_result.schema.json`; sidecar primitive boundaries are
 documented in `docs/contracts/sidecar_primitives.md`. The long-running service
-job contract is documented in `docs/contracts/service_jobs.md`. The Phase 9
-Go-native path1 raw candidate parity contract is documented in
+job contract is documented in `docs/contracts/service_jobs.md`; worker command
+contracts are documented in `docs/contracts/generate_golden_worker.md` and
+`docs/contracts/build_graph_worker.md`. The Phase 9 Go-native path1 raw
+candidate parity contract is documented in
 `docs/contracts/path1_candidate_generation.md`.

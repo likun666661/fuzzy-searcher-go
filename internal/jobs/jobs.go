@@ -97,6 +97,21 @@ type GenerateGoldenSpec struct {
 	WorkingDir       string   `json:"working_dir,omitempty"`
 }
 
+// BuildGraphSpec is the typed job spec for Python graph construction workers.
+type BuildGraphSpec struct {
+	Dataset          string `json:"dataset"`
+	CorpusPath       string `json:"corpus_path"`
+	SchemaPath       string `json:"schema_path,omitempty"`
+	GraphOutputPath  string `json:"graph_output_path"`
+	ChunksOutputPath string `json:"chunks_output_path"`
+	CacheDir         string `json:"cache_dir,omitempty"`
+	ConfigPath       string `json:"config_path,omitempty"`
+	Mode             string `json:"mode,omitempty"`
+	PythonBin        string `json:"python_bin,omitempty"`
+	ScriptPath       string `json:"script_path,omitempty"`
+	WorkingDir       string `json:"working_dir,omitempty"`
+}
+
 // Runner is the unit of work executed by the manager.
 type Runner func(context.Context, *Recorder) (any, error)
 
