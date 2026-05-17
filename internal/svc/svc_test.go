@@ -633,6 +633,29 @@ with open(chunks, "w", encoding="utf-8") as f:
 	if deleted.Code != http.StatusOK {
 		t.Fatalf("delete status = %d, body = %s", deleted.Code, deleted.Body.String())
 	}
+	failedImport := httptest.NewRecorder()
+	routes.ServeHTTP(failedImport, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"failed_import","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(filepath.Join(root, "incoming", "missing-schema.json"))+`}`)))
+	if failedImport.Code != http.StatusBadRequest {
+		t.Fatalf("failed import status = %d, body = %s", failedImport.Code, failedImport.Body.String())
+	}
+	missingSchemaImport := httptest.NewRecorder()
+	routes.ServeHTTP(missingSchemaImport, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"failed_rebuild","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
+	if missingSchemaImport.Code != http.StatusCreated {
+		t.Fatalf("failed_rebuild import status = %d, body = %s", missingSchemaImport.Code, missingSchemaImport.Body.String())
+	}
+	if err := os.Remove(filepath.Join(root, "schemas", "failed_rebuild.json")); err != nil {
+		t.Fatalf("remove failed_rebuild schema: %v", err)
+	}
+	failedRebuild := httptest.NewRecorder()
+	routes.ServeHTTP(failedRebuild, httptest.NewRequest(http.MethodPost, "/v1/datasets/failed_rebuild/rebuild", bytes.NewBufferString(`{}`)))
+	if failedRebuild.Code != http.StatusConflict {
+		t.Fatalf("failed rebuild status = %d, body = %s", failedRebuild.Code, failedRebuild.Body.String())
+	}
+	failedDelete := httptest.NewRecorder()
+	routes.ServeHTTP(failedDelete, httptest.NewRequest(http.MethodDelete, "/v1/datasets/not_managed", nil))
+	if failedDelete.Code != http.StatusNotFound {
+		t.Fatalf("failed delete status = %d, body = %s", failedDelete.Code, failedDelete.Body.String())
+	}
 	created := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"type":"create_dataset","create_dataset":{"dataset":"created","document_paths":[` + quote(document) + `],"schema_path":` + quote(sourceSchema) + `}}`)
 	routes.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/v1/workflows", body))
@@ -655,6 +678,10 @@ with open(chunks, "w", encoding="utf-8") as f:
 		!strings.Contains(all.Body.String(), `"type":"rebuild"`) ||
 		!strings.Contains(all.Body.String(), `"type":"delete"`) ||
 		!strings.Contains(all.Body.String(), `"type":"create_dataset"`) ||
+		!strings.Contains(all.Body.String(), `"dataset":"failed_import"`) ||
+		!strings.Contains(all.Body.String(), `"dataset":"failed_rebuild"`) ||
+		!strings.Contains(all.Body.String(), `"dataset":"not_managed"`) ||
+		!strings.Contains(all.Body.String(), `"status":"failed"`) ||
 		!strings.Contains(all.Body.String(), `"workflow_id"`) {
 		t.Fatalf("operations list status = %d, body = %s", all.Code, all.Body.String())
 	}
@@ -673,6 +700,11 @@ with open(chunks, "w", encoding="utf-8") as f:
 	routes.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/v1/dataset-operations/"+detailID, nil))
 	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"schema_version":"dataset-operation/v1"`) {
 		t.Fatalf("operation detail status = %d, body = %s", detail.Code, detail.Body.String())
+	}
+	missingOperation := httptest.NewRecorder()
+	routes.ServeHTTP(missingOperation, httptest.NewRequest(http.MethodGet, "/v1/dataset-operations/missing", nil))
+	if missingOperation.Code != http.StatusNotFound || !strings.Contains(missingOperation.Body.String(), "dataset_operation_not_found") {
+		t.Fatalf("missing operation status = %d, body = %s", missingOperation.Code, missingOperation.Body.String())
 	}
 	filtered := httptest.NewRecorder()
 	routes.ServeHTTP(filtered, httptest.NewRequest(http.MethodGet, "/v1/datasets/imported/operations", nil))

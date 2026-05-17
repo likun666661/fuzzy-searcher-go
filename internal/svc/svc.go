@@ -211,8 +211,12 @@ func (s *Service) handleDeleteDataset(w http.ResponseWriter, r *http.Request) {
 		Force:         queryBoolDefault(r, "force", false),
 	})
 	if err != nil {
+		dataset := result.Dataset
+		if dataset == "" {
+			dataset = name
+		}
 		s.recordDatasetOperation(datasetops.Operation{
-			Dataset:   result.Dataset,
+			Dataset:   dataset,
 			Type:      datasetops.TypeDelete,
 			Status:    "failed",
 			Artifacts: result.Artifacts,
