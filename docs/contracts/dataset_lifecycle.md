@@ -122,37 +122,152 @@ the boundary explicit:
   non-goal and keep the delete operation scoped to managed paths only;
 - tests should verify that delete does not mutate unrelated dataset artifacts.
 
-## Rebuild Shape
+## Rebuild Endpoint
 
-Rebuild is not required as a separate endpoint in Phase 19, but the contract
-should leave a stable path:
+Phase 20 promotes rebuild from a future shape to a stable operation:
 
 ```http
 POST /v1/datasets/{dataset}/rebuild
 content-type: application/json
 ```
 
-Proposed request:
+Request:
 
 ```json
 {
+  "dry_run": false,
   "overwrite_outputs": true,
   "build_graph": {
     "mode": "noagent",
-    "config_path": "/abs/path/config/base_config.yaml"
+    "config_path": "/abs/path/config/base_config.yaml",
+    "graph_output_path": "/abs/path/youtu-graphrag/output/graphs/news_2026_new.json",
+    "chunks_output_path": "/abs/path/youtu-graphrag/output/chunks/news_2026.txt",
+    "cache_dir": "/abs/path/youtu-graphrag/retriever/faiss_cache_new/news_2026"
   }
 }
 ```
 
-Recommended behavior:
+Fields:
+
+- `dry_run`: defaults to `false`. When true, validate the managed dataset and
+  report cleanup/build plan without deleting outputs or submitting a job.
+- `overwrite_outputs`: defaults to `true`. When true, graph/chunks/cache
+  outputs may be removed before the build job starts. When false, existing
+  graph/chunks/cache outputs cause a conflict.
+- `build_graph`: optional build graph overrides. Supported fields mirror the
+  `build_graph` job spec where useful: `mode`, `config_path`,
+  `graph_output_path`, `chunks_output_path`, `cache_dir`, `python_bin`,
+  `script_path`, and `working_dir`.
+
+Required preconditions:
 
 - require managed corpus and schema to exist;
-- delete or overwrite graph/chunks/cache outputs;
-- submit a `build_graph` job or future workflow step;
-- return a job/workflow reference rather than blocking until build completes.
+- require dataset metadata to exist unless a future explicit `force` option is
+  added;
+- resolve corpus/schema from managed artifact paths, not from caller-supplied
+  arbitrary source paths.
 
-Until this endpoint exists, rebuild should be performed by submitting
-`build_graph` or `create_dataset` with explicit overwrite semantics.
+Response for a real rebuild:
+
+```json
+{
+  "schema_version": "dataset-rebuild/v1",
+  "dataset": "news_2026",
+  "status": "submitted",
+  "dry_run": false,
+  "overwrite_outputs": true,
+  "job_id": "job_...",
+  "job_type": "build_graph",
+  "artifacts": [
+    {
+      "name": "corpus",
+      "role": "input",
+      "kind": "corpus_json",
+      "dataset": "news_2026",
+      "path": ".../data/uploaded/news_2026/corpus.json",
+      "status": "configured"
+    },
+    {
+      "name": "graph",
+      "role": "output",
+      "kind": "graph_json",
+      "schema_version": "youtu-graph/v1",
+      "dataset": "news_2026",
+      "path": ".../output/graphs/news_2026_new.json",
+      "status": "pending"
+    }
+  ]
+}
+```
+
+Response for `dry_run=true`:
+
+```json
+{
+  "schema_version": "dataset-rebuild/v1",
+  "dataset": "news_2026",
+  "status": "planned",
+  "dry_run": true,
+  "overwrite_outputs": true,
+  "job_id": "",
+  "job_type": "build_graph",
+  "artifacts": []
+}
+```
+
+Artifact status values:
+
+- `configured`: managed corpus/schema input exists and will be passed to
+  `build_graph`.
+- `pending`: graph/chunks/cache output is expected from the submitted job.
+- `deleted`: stale output existed and was removed before job submission.
+- `missing`: output was absent during cleanup planning.
+- `skipped`: output cleanup was skipped because `dry_run=true`.
+- `conflict`: output exists and `overwrite_outputs=false`.
+- `failed`: cleanup or validation failed.
+
+The rebuild endpoint returns after submitting the `build_graph` job. Clients
+then inspect the job through existing `/v1/jobs/{job_id}` and
+`/v1/jobs/{job_id}/events` APIs.
+
+## Rebuild Cleanup Scope
+
+Rebuild cleanup is narrower than dataset delete. It may touch only derived
+build outputs:
+
+- graph: `$YOUTU_RAG_GRAPH_ROOT/<dataset>_new.json`
+- chunks: `$YOUTU_RAG_CHUNKS_ROOT/<dataset>.txt`
+- cache: `$YOUTU_RAG_CACHE_ROOT/<dataset>`
+
+It MUST NOT delete:
+
+- managed corpus;
+- managed schema;
+- dataset metadata;
+- golden fixtures;
+- triple traces;
+- answers.
+
+Those broader cleanup operations remain under the dataset delete endpoint.
+
+## Rebuild Error Semantics
+
+Stable error codes:
+
+- `invalid_dataset`: unsafe dataset name.
+- `dataset_not_managed`: metadata file is missing.
+- `dataset_not_ready`: managed corpus or schema is missing.
+- `dataset_rebuild_conflict`: graph/chunks/cache output exists and
+  `overwrite_outputs=false`.
+- `dataset_rebuild_failed`: cleanup or job submission failed.
+
+Recommended HTTP mapping:
+
+- invalid dataset name: `400`
+- not managed or missing corpus/schema: `404` or `409`; use one consistently in
+  implementation/tests
+- output conflict: `409`
+- cleanup/submission failure: `500`
 
 ## Acceptance Criteria
 
@@ -167,5 +282,12 @@ Phase 19 validation should verify:
 - missing managed artifacts are reported as `missing`, not generic failure.
 - registry no longer lists the deleted dataset after metadata/corpus/schema are
   removed.
+- `POST /v1/datasets/{dataset}/rebuild` returns `dataset-rebuild/v1`.
+- rebuild requires a managed dataset with corpus and schema.
+- `dry_run=true` returns a plan and does not delete outputs or create a job.
+- `overwrite_outputs=false` rejects existing graph/chunks/cache outputs.
+- `overwrite_outputs=true` clears graph/chunks/cache only, preserving
+  corpus/schema/metadata/golden/trace/answer artifacts.
+- real rebuild submits a `build_graph` job and returns its `job_id`.
 - existing import, create_dataset, build_graph, answer, workflow, and demo
   gates do not regress.
