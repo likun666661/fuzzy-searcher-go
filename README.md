@@ -39,7 +39,8 @@ For a plain-language architecture walkthrough, read
 `docs/architecture_overview.md`.
 
 For the next service-oriented Youtu-RAG roadmap, read
-`docs/youtu_rag_service_plan.md`.
+`docs/youtu_rag_service_plan.md`. For the service testing track, read
+`docs/service_test_strategy.md`.
 
 ## Test
 
