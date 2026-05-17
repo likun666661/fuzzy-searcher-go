@@ -71,7 +71,10 @@ It currently exposes the first service milestone:
 - `GET /v1/jobs/{job_id}/events`
 - `POST /v1/jobs/{job_id}/cancel`
 - `POST /v1/workflows`
+- `GET /v1/workflows`
 - `GET /v1/workflows/{workflow_id}`
+- `GET /v1/workflows/{workflow_id}/steps`
+- `GET /v1/workflows/{workflow_id}/steps/{step_name}`
 - `GET /v1/workflows/{workflow_id}/events`
 - `POST /v1/workflows/{workflow_id}/cancel`
 
@@ -146,7 +149,10 @@ curl -s http://127.0.0.1:8080/v1/workflows \
 Then inspect the workflow and its event stream:
 
 ```bash
+curl -s http://127.0.0.1:8080/v1/workflows
 curl -s http://127.0.0.1:8080/v1/workflows/<workflow_id>
+curl -s http://127.0.0.1:8080/v1/workflows/<workflow_id>/steps
+curl -s http://127.0.0.1:8080/v1/workflows/<workflow_id>/steps/build_graph
 curl -s http://127.0.0.1:8080/v1/workflows/<workflow_id>/events
 curl -s -X POST http://127.0.0.1:8080/v1/workflows/<workflow_id>/cancel
 ```

@@ -59,7 +59,10 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/jobs/{job_id}/events", s.handleJobEvents)
 	mux.HandleFunc("POST /v1/jobs/{job_id}/cancel", s.handleCancelJob)
 	mux.HandleFunc("POST /v1/workflows", s.handleCreateWorkflow)
+	mux.HandleFunc("GET /v1/workflows", s.handleWorkflows)
 	mux.HandleFunc("GET /v1/workflows/{workflow_id}", s.handleWorkflow)
+	mux.HandleFunc("GET /v1/workflows/{workflow_id}/steps", s.handleWorkflowSteps)
+	mux.HandleFunc("GET /v1/workflows/{workflow_id}/steps/{step_name}", s.handleWorkflowStep)
 	mux.HandleFunc("GET /v1/workflows/{workflow_id}/events", s.handleWorkflowEvents)
 	mux.HandleFunc("POST /v1/workflows/{workflow_id}/cancel", s.handleCancelWorkflow)
 	return mux
@@ -792,6 +795,15 @@ func isJobTerminal(status jobs.Status) bool {
 	return status == jobs.StatusSucceeded || status == jobs.StatusFailed || status == jobs.StatusCanceled
 }
 
+func (s *Service) handleWorkflows(w http.ResponseWriter, r *http.Request) {
+	workflows := s.workflows.List()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"schema_version": "workflow-list/v1",
+		"count":          len(workflows),
+		"workflows":      workflows,
+	})
+}
+
 func (s *Service) handleWorkflow(w http.ResponseWriter, r *http.Request) {
 	workflow, err := s.workflows.Get(r.PathValue("workflow_id"))
 	if err != nil {
@@ -799,6 +811,33 @@ func (s *Service) handleWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, workflow)
+}
+
+func (s *Service) handleWorkflowSteps(w http.ResponseWriter, r *http.Request) {
+	steps, err := s.workflows.Steps(r.PathValue("workflow_id"))
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"schema_version": "workflow-steps/v1",
+		"workflow_id":    r.PathValue("workflow_id"),
+		"count":          len(steps),
+		"steps":          steps,
+	})
+}
+
+func (s *Service) handleWorkflowStep(w http.ResponseWriter, r *http.Request) {
+	step, err := s.workflows.Step(r.PathValue("workflow_id"), r.PathValue("step_name"))
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"schema_version": "workflow-step/v1",
+		"workflow_id":    r.PathValue("workflow_id"),
+		"step":           step,
+	})
 }
 
 func (s *Service) handleWorkflowEvents(w http.ResponseWriter, r *http.Request) {
@@ -884,6 +923,10 @@ func writeJobError(w http.ResponseWriter, err error) {
 func writeWorkflowError(w http.ResponseWriter, err error) {
 	if errors.Is(err, workflows.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "workflow_not_found", err)
+		return
+	}
+	if errors.Is(err, workflows.ErrStepNotFound) {
+		writeError(w, http.StatusNotFound, "workflow_step_not_found", err)
 		return
 	}
 	writeError(w, http.StatusInternalServerError, "workflow_failed", err)

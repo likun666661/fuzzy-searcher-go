@@ -53,6 +53,47 @@ func TestManagerRunsWorkflowAndRecordsSteps(t *testing.T) {
 	}
 }
 
+func TestManagerListsWorkflowsAndFindsSteps(t *testing.T) {
+	manager := workflows.NewManager()
+	first := manager.SubmitSpec(workflows.TypeBuildAndAnswer, workflows.BuildAndAnswerSpec{Dataset: "demo", Question: "One?"}, nil, func(ctx context.Context, recorder *workflows.Recorder) (any, error) {
+		job := jobs.Job{ID: "job_first", Type: jobs.TypeBuildGraph, Status: jobs.StatusSucceeded}
+		recorder.StepStarted("build_graph", job)
+		recorder.StepFinished("build_graph", job)
+		return map[string]string{"ok": "first"}, nil
+	})
+	first = waitForStatus(t, manager, first.ID, workflows.StatusSucceeded)
+	time.Sleep(time.Millisecond)
+	second := manager.SubmitSpec(workflows.TypeBuildAndAnswer, workflows.BuildAndAnswerSpec{Dataset: "demo", Question: "Two?"}, nil, func(ctx context.Context, recorder *workflows.Recorder) (any, error) {
+		job := jobs.Job{ID: "job_second", Type: jobs.TypeAnswer, Status: jobs.StatusSucceeded}
+		recorder.StepStarted("answer", job)
+		recorder.StepFinished("answer", job)
+		return map[string]string{"ok": "second"}, nil
+	})
+	second = waitForStatus(t, manager, second.ID, workflows.StatusSucceeded)
+
+	list := manager.List()
+	if len(list) != 2 || list[0].ID != second.ID || list[1].ID != first.ID {
+		t.Fatalf("list = %#v", list)
+	}
+	steps, err := manager.Steps(second.ID)
+	if err != nil {
+		t.Fatalf("steps: %v", err)
+	}
+	if len(steps) != 1 || steps[0].Name != "answer" || steps[0].JobID != "job_second" {
+		t.Fatalf("steps = %#v", steps)
+	}
+	step, err := manager.Step(second.ID, "answer")
+	if err != nil {
+		t.Fatalf("step: %v", err)
+	}
+	if step.Type != jobs.TypeAnswer || step.Status != jobs.StatusSucceeded {
+		t.Fatalf("step = %#v", step)
+	}
+	if _, err := manager.Step(second.ID, "missing"); err != workflows.ErrStepNotFound {
+		t.Fatalf("missing step err = %v", err)
+	}
+}
+
 func TestManagerFileStoreReloadsCompletedWorkflows(t *testing.T) {
 	dir := t.TempDir()
 	manager := workflows.NewManager(workflows.WithFileStore(dir))

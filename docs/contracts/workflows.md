@@ -123,11 +123,68 @@ filesystem paths alone.
 Add these endpoints:
 
 - `POST /v1/workflows`
+- `GET /v1/workflows`
 - `GET /v1/workflows/{workflow_id}`
+- `GET /v1/workflows/{workflow_id}/steps`
+- `GET /v1/workflows/{workflow_id}/steps/{step_name}`
 - `GET /v1/workflows/{workflow_id}/events`
 - `POST /v1/workflows/{workflow_id}/cancel`
 
 The existing job endpoints remain supported.
+
+### Workflow Listing
+
+`GET /v1/workflows` returns a stable list envelope ordered newest first:
+
+```json
+{
+  "schema_version": "workflow-list/v1",
+  "count": 1,
+  "workflows": [
+    {
+      "schema_version": "workflow/v1",
+      "id": "wf_...",
+      "type": "build_and_answer",
+      "status": "succeeded"
+    }
+  ]
+}
+```
+
+The list intentionally returns the same `workflow/v1` snapshots as
+`GET /v1/workflows/{workflow_id}`. Clients do not need a second summary shape
+for the first service milestone.
+
+### Step Inspection
+
+`GET /v1/workflows/{workflow_id}/steps` returns:
+
+```json
+{
+  "schema_version": "workflow-steps/v1",
+  "workflow_id": "wf_...",
+  "count": 2,
+  "steps": []
+}
+```
+
+`GET /v1/workflows/{workflow_id}/steps/{step_name}` returns:
+
+```json
+{
+  "schema_version": "workflow-step/v1",
+  "workflow_id": "wf_...",
+  "step": {
+    "name": "build_graph",
+    "job_id": "job_...",
+    "type": "build_graph",
+    "status": "succeeded"
+  }
+}
+```
+
+Unknown workflow ids return `workflow_not_found`. Unknown step names for a
+known workflow return `workflow_step_not_found`.
 
 ## Persistence
 
@@ -185,7 +242,8 @@ Workflow validation should cover:
 
 - API contract:
   - `POST /v1/workflows` returns `workflow/v1`.
-  - `GET /v1/workflows/{id}` and `/events` are stable.
+  - `GET /v1/workflows`, `/{id}`, `/steps`, `/steps/{name}`, and `/events`
+    are stable.
 - artifact contract:
   - graph/chunks/cache from build step appear as workflow artifacts.
   - graph/chunks are passed into answer step.

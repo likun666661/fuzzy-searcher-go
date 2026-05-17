@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +17,10 @@ import (
 
 // ErrNotFound means a workflow id is unknown to the manager.
 var ErrNotFound = errors.New("workflow not found")
+
+// ErrStepNotFound means a workflow exists but does not contain the requested
+// step name.
+var ErrStepNotFound = errors.New("workflow step not found")
 
 // Status is the lifecycle state for one workflow.
 type Status string
@@ -175,6 +180,46 @@ func (m *Manager) Get(id string) (Workflow, error) {
 		return Workflow{}, ErrNotFound
 	}
 	return cloneWorkflow(ent.workflow), nil
+}
+
+// List returns workflow snapshots ordered by creation time, newest first.
+func (m *Manager) List() []Workflow {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	workflows := make([]Workflow, 0, len(m.entries))
+	for _, ent := range m.entries {
+		workflows = append(workflows, cloneWorkflow(ent.workflow))
+	}
+	sort.Slice(workflows, func(i, j int) bool {
+		if workflows[i].CreatedAt.Equal(workflows[j].CreatedAt) {
+			return workflows[i].ID > workflows[j].ID
+		}
+		return workflows[i].CreatedAt.After(workflows[j].CreatedAt)
+	})
+	return workflows
+}
+
+// Steps returns the ordered child-job step snapshots for one workflow.
+func (m *Manager) Steps(id string) ([]Step, error) {
+	workflow, err := m.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	return append([]Step(nil), workflow.Steps...), nil
+}
+
+// Step returns one child-job step snapshot by workflow step name.
+func (m *Manager) Step(id string, name string) (Step, error) {
+	steps, err := m.Steps(id)
+	if err != nil {
+		return Step{}, err
+	}
+	for _, step := range steps {
+		if step.Name == name {
+			return step, nil
+		}
+	}
+	return Step{}, ErrStepNotFound
 }
 
 // Events returns a copy of the event stream for one workflow.

@@ -1284,6 +1284,98 @@ with open(output, "w", encoding="utf-8") as f:
 	}
 }
 
+func TestWorkflowListAndStepInspectionEndpoints(t *testing.T) {
+	dir := t.TempDir()
+	buildScript := filepath.Join(dir, "build_worker.py")
+	answerScript := filepath.Join(dir, "answer_worker.py")
+	mustWrite(t, filepath.Join(dir, "data", "demo", "demo_corpus.json"), "[]")
+	mustWrite(t, filepath.Join(dir, "schemas", "demo.json"), "{}")
+	writeBuildWorker(t, buildScript)
+	writeExecutable(t, answerScript, `#!/usr/bin/env python3
+import json
+import os
+import sys
+output = sys.argv[sys.argv.index("--output") + 1]
+os.makedirs(os.path.dirname(output), exist_ok=True)
+with open(output, "w", encoding="utf-8") as f:
+    json.dump({"schema_version": "answer-output/v1", "answer": "ok"}, f)
+`)
+
+	cfg := workflowTestConfig(dir, buildScript, answerScript)
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	workflow := createBuildAndAnswerWorkflow(t, routes, "demo", "Who?", "")
+	workflow = waitForWorkflow(t, routes, workflow["id"].(string), "succeeded")
+	id := workflow["id"].(string)
+
+	list := httptest.NewRecorder()
+	routes.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/workflows", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("workflow list status = %d, body = %s", list.Code, list.Body.String())
+	}
+	for _, want := range []string{`"schema_version":"workflow-list/v1"`, `"count":1`, id} {
+		if !strings.Contains(list.Body.String(), want) {
+			t.Fatalf("workflow list missing %s: %s", want, list.Body.String())
+		}
+	}
+
+	steps := httptest.NewRecorder()
+	routes.ServeHTTP(steps, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id+"/steps", nil))
+	if steps.Code != http.StatusOK {
+		t.Fatalf("workflow steps status = %d, body = %s", steps.Code, steps.Body.String())
+	}
+	for _, want := range []string{
+		`"schema_version":"workflow-steps/v1"`,
+		`"count":2`,
+		`"name":"build_graph"`,
+		`"name":"answer"`,
+		`"job_id":"job_`,
+		`"output_artifacts"`,
+	} {
+		if !strings.Contains(steps.Body.String(), want) {
+			t.Fatalf("workflow steps missing %s: %s", want, steps.Body.String())
+		}
+	}
+
+	step := httptest.NewRecorder()
+	routes.ServeHTTP(step, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id+"/steps/build_graph", nil))
+	if step.Code != http.StatusOK {
+		t.Fatalf("workflow step status = %d, body = %s", step.Code, step.Body.String())
+	}
+	for _, want := range []string{
+		`"schema_version":"workflow-step/v1"`,
+		`"workflow_id":"` + id + `"`,
+		`"name":"build_graph"`,
+		`"type":"build_graph"`,
+		`"status":"succeeded"`,
+		`"job_id":"job_`,
+	} {
+		if !strings.Contains(step.Body.String(), want) {
+			t.Fatalf("workflow step missing %s: %s", want, step.Body.String())
+		}
+	}
+
+	missing := httptest.NewRecorder()
+	routes.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id+"/steps/missing", nil))
+	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), "workflow_step_not_found") {
+		t.Fatalf("missing workflow step status = %d, body = %s", missing.Code, missing.Body.String())
+	}
+
+	restarted := svc.NewService(cfg)
+	restartedRoutes := restarted.Routes()
+	restartedList := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(restartedList, httptest.NewRequest(http.MethodGet, "/v1/workflows", nil))
+	if restartedList.Code != http.StatusOK || !strings.Contains(restartedList.Body.String(), id) {
+		t.Fatalf("restarted workflow list status = %d, body = %s", restartedList.Code, restartedList.Body.String())
+	}
+	restartedStep := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(restartedStep, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id+"/steps/answer", nil))
+	if restartedStep.Code != http.StatusOK || !strings.Contains(restartedStep.Body.String(), `"name":"answer"`) {
+		t.Fatalf("restarted workflow step status = %d, body = %s", restartedStep.Code, restartedStep.Body.String())
+	}
+}
+
 func TestBuildAndAnswerWorkflowBuildFailureStopsAnswer(t *testing.T) {
 	dir := t.TempDir()
 	buildScript := filepath.Join(dir, "build_worker.py")
