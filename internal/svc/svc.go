@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/fuzzy-searcher-go/internal/artifacts"
 	"github.com/fuzzy-searcher-go/internal/chunks"
 	"github.com/fuzzy-searcher-go/internal/config"
 	"github.com/fuzzy-searcher-go/internal/dataset"
@@ -34,6 +35,9 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("GET /v1/version", s.handleVersion)
+	mux.HandleFunc("GET /v1/datasets", s.handleDatasets)
+	mux.HandleFunc("GET /v1/datasets/{dataset}", s.handleDataset)
+	mux.HandleFunc("GET /v1/datasets/{dataset}/artifacts", s.handleDatasetArtifacts)
 	mux.HandleFunc("POST /v1/retrieve", s.handleRetrieve)
 	return mux
 }
@@ -56,12 +60,16 @@ func (s *Service) handleVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleReady(w http.ResponseWriter, r *http.Request) {
+	registry := artifacts.NewRegistry(s.config)
+	defaultDataset := registry.Get(s.config.DefaultDataset)
 	checks := map[string]any{
 		"graph_configured":   s.config.DefaultGraph != "",
 		"chunks_configured":  s.config.DefaultChunks != "",
 		"sidecar_configured": s.config.DefaultSidecar != "",
+		"default_dataset":    defaultDataset.Name,
+		"dataset_status":     defaultDataset.Status,
 	}
-	ready := true
+	ready := defaultDataset.RetrievalReady
 	if s.config.DefaultGraph != "" {
 		if _, err := os.Stat(s.config.DefaultGraph); err != nil {
 			ready = false
@@ -74,6 +82,9 @@ func (s *Service) handleReady(w http.ResponseWriter, r *http.Request) {
 			checks["chunks_error"] = err.Error()
 		}
 	}
+	if len(defaultDataset.MissingRetrievalArtifacts) > 0 {
+		checks["missing_retrieval_artifacts"] = defaultDataset.MissingRetrievalArtifacts
+	}
 	status := http.StatusOK
 	if !ready {
 		status = http.StatusServiceUnavailable
@@ -81,6 +92,36 @@ func (s *Service) handleReady(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, map[string]any{
 		"ready":  ready,
 		"checks": checks,
+	})
+}
+
+func (s *Service) handleDatasets(w http.ResponseWriter, r *http.Request) {
+	registry := artifacts.NewRegistry(s.config)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"datasets": registry.List(),
+	})
+}
+
+func (s *Service) handleDataset(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("dataset")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_dataset", fmt.Errorf("dataset is required"))
+		return
+	}
+	registry := artifacts.NewRegistry(s.config)
+	writeJSON(w, http.StatusOK, registry.Get(name))
+}
+
+func (s *Service) handleDatasetArtifacts(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("dataset")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_dataset", fmt.Errorf("dataset is required"))
+		return
+	}
+	registry := artifacts.NewRegistry(s.config)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dataset":   name,
+		"artifacts": registry.Artifacts(name),
 	})
 }
 

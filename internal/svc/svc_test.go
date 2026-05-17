@@ -55,6 +55,46 @@ func TestRetrieveValidation(t *testing.T) {
 	}
 }
 
+func TestDatasetEndpoints(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "data", "demo", "demo_corpus.json"), "{}")
+	mustWrite(t, filepath.Join(root, "schemas", "demo.json"), "{}")
+	mustWrite(t, filepath.Join(root, "output", "graphs", "demo_new.json"), "[]")
+	mustWrite(t, filepath.Join(root, "output", "chunks", "demo.txt"), "")
+	mustMkdir(t, filepath.Join(root, "retriever", "faiss_cache_new", "demo"))
+
+	service := svc.NewService(config.Config{
+		DefaultDataset: "demo",
+		CorpusRoot:     filepath.Join(root, "data"),
+		SchemaRoot:     filepath.Join(root, "schemas"),
+		GraphRoot:      filepath.Join(root, "output", "graphs"),
+		ChunksRoot:     filepath.Join(root, "output", "chunks"),
+		CacheRoot:      filepath.Join(root, "retriever", "faiss_cache_new"),
+		GoldenRoot:     filepath.Join(root, "output", "retrieval_golden"),
+		TraceRoot:      filepath.Join(root, "output", "retrieval_traces"),
+		DatasetNames:   []string{"demo"},
+	})
+	routes := service.Routes()
+
+	list := httptest.NewRecorder()
+	routes.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/datasets", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("datasets status = %d, body = %s", list.Code, list.Body.String())
+	}
+	if !strings.Contains(list.Body.String(), `"status":"retrieval_ready"`) {
+		t.Fatalf("datasets body = %s", list.Body.String())
+	}
+
+	artifacts := httptest.NewRecorder()
+	routes.ServeHTTP(artifacts, httptest.NewRequest(http.MethodGet, "/v1/datasets/demo/artifacts", nil))
+	if artifacts.Code != http.StatusOK {
+		t.Fatalf("artifacts status = %d, body = %s", artifacts.Code, artifacts.Body.String())
+	}
+	if !strings.Contains(artifacts.Body.String(), `"name":"graph"`) {
+		t.Fatalf("artifacts body = %s", artifacts.Body.String())
+	}
+}
+
 func TestRetrieveNative(t *testing.T) {
 	dir := t.TempDir()
 	graphPath := filepath.Join(dir, "graph.json")
@@ -90,4 +130,21 @@ func TestRetrieveNative(t *testing.T) {
 
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+}
+
+func mustWrite(t *testing.T, path string, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
 }

@@ -57,11 +57,15 @@ It currently exposes the first service milestone:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /v1/version`
+- `GET /v1/datasets`
+- `GET /v1/datasets/{dataset}`
+- `GET /v1/datasets/{dataset}/artifacts`
 - `POST /v1/retrieve`
 
 Run it with explicit demo artifacts:
 
 ```bash
+YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag \
 YOUTU_RAG_GRAPH=/abs/path/youtu-graphrag/output/graphs/demo_new.json \
 YOUTU_RAG_CHUNKS=/abs/path/youtu-graphrag/output/chunks/demo.txt \
 YOUTU_RAG_SIDECAR_URL=http://127.0.0.1:8765 \
@@ -80,6 +84,18 @@ curl -s http://127.0.0.1:8080/v1/retrieve \
     "top_k": 20
   }'
 ```
+
+Dataset and artifact registry endpoints report what the service can see:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/datasets
+curl -s http://127.0.0.1:8080/v1/datasets/demo/artifacts
+```
+
+By default the registry looks for a sibling `../youtu-graphrag` checkout. In a
+clean clone elsewhere, set `YOUTU_RAG_ARTIFACT_ROOT` or the individual root
+variables (`YOUTU_RAG_SCHEMA_ROOT`, `YOUTU_RAG_GRAPH_ROOT`,
+`YOUTU_RAG_CHUNKS_ROOT`, `YOUTU_RAG_CACHE_ROOT`) explicitly.
 
 If the Python sidecar is running, run the demo parity gates:
 
