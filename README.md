@@ -47,6 +47,40 @@ For the next service-oriented Youtu-RAG roadmap, read
 go test ./...
 ```
 
+## Service
+
+The long-running service entrypoint follows the `ggsrv-layout` shape at a
+lighter weight: `cmd/youtu-rag-service` owns process startup, `internal/config`
+owns environment configuration, and `internal/svc` owns HTTP request handling.
+It currently exposes the first service milestone:
+
+- `GET /healthz`
+- `GET /readyz`
+- `GET /v1/version`
+- `POST /v1/retrieve`
+
+Run it with explicit demo artifacts:
+
+```bash
+YOUTU_RAG_GRAPH=/abs/path/youtu-graphrag/output/graphs/demo_new.json \
+YOUTU_RAG_CHUNKS=/abs/path/youtu-graphrag/output/chunks/demo.txt \
+YOUTU_RAG_SIDECAR_URL=http://127.0.0.1:8765 \
+YOUTU_RAG_MODE=native-path1-rerank \
+make service-run
+```
+
+Then call the retrieve API:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/retrieve \
+  -H 'content-type: application/json' \
+  -d '{
+    "dataset": "demo",
+    "question": "When was the person who Messi'\''s goals in Copa del Rey compared to get signed by Barcelona?",
+    "top_k": 20
+  }'
+```
+
 If the Python sidecar is running, run the demo parity gates:
 
 ```bash
