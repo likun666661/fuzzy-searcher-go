@@ -26,6 +26,7 @@ func main() {
 	datasetName := flag.String("dataset", "demo", "Dataset name for sidecar requests")
 	involvedTypesPath := flag.String("involved-types", "", "Optional involved_types JSON file")
 	sidecarURL := flag.String("sidecar-url", "", "Optional Python sidecar base URL")
+	mode := flag.String("mode", "", "Retrieval mode: native, sidecar, runtime-trace, path2-detrace, primitive-merge, rerank-merge")
 	tripleTracePath := flag.String("triple-trace", "", "Optional Python triple-trace/v1 JSON path")
 	sidecarTripleTrace := flag.Bool("sidecar-triple-trace", false, "Fetch Python triple-trace/v1 from --sidecar-url")
 	sidecarPath1Triples := flag.Bool("sidecar-path1-triples", false, "Fetch Python path1-triples/v1 from --sidecar-url and merge locally")
@@ -38,6 +39,9 @@ func main() {
 	if *graphPath == "" || *chunksPath == "" || *question == "" {
 		fmt.Fprintln(os.Stderr, "required flags: --graph, --chunks, --question")
 		os.Exit(2)
+	}
+	if err := applyMode(*mode, sidecarTripleTrace, sidecarPath1Triples, sidecarPath2Triples, sidecarRerankTriples); err != nil {
+		fatal(err)
 	}
 
 	graph, err := dataset.LoadGraph(*graphPath)
@@ -136,6 +140,30 @@ func main() {
 		fatal(err)
 	}
 	fmt.Println(string(out))
+}
+
+func applyMode(mode string, sidecarTripleTrace *bool, sidecarPath1Triples *bool, sidecarPath2Triples *bool, sidecarRerankTriples *bool) error {
+	switch mode {
+	case "":
+		return nil
+	case "native", "sidecar":
+		return nil
+	case "runtime-trace":
+		*sidecarTripleTrace = true
+	case "path2-detrace":
+		*sidecarTripleTrace = true
+		*sidecarPath2Triples = true
+	case "primitive-merge":
+		*sidecarPath1Triples = true
+		*sidecarPath2Triples = true
+	case "rerank-merge":
+		*sidecarPath1Triples = true
+		*sidecarRerankTriples = true
+		*sidecarPath2Triples = true
+	default:
+		return fmt.Errorf("unsupported --mode %q", mode)
+	}
+	return nil
 }
 
 func fetchRerankTriples(ctx context.Context, client *sidecar.Client, req retrieval.RetrieveRequest) (*retrieval.RerankTriples, error) {

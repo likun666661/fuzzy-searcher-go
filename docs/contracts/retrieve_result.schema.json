@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/likun666661/fuzzy-searcher-go/docs/contracts/retrieve_result.schema.json",
+  "title": "RetrieveResult",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["triples", "chunk_ids", "chunk_contents", "debug"],
+  "properties": {
+    "triples": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "chunk_ids": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "chunk_contents": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "chunk_retrieval_results": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "debug": {
+      "type": "object",
+      "required": ["strategies"],
+      "properties": {
+        "strategies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "count"],
+            "properties": {
+              "name": { "type": "string" },
+              "count": { "type": "integer" },
+              "meta": { "type": "object", "additionalProperties": true }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

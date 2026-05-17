@@ -180,6 +180,32 @@ count and top-N overlap improve. Use `--fail-on loader --fail-on chunk` to make
 the report fail only on regressions in already-green gates; add
 `--fail-on triple` once triple/vector rerank is expected to pass.
 
+## Current Engineering Gate
+
+The current preferred mode is `rerank-merge`. It should be checked alongside
+two regression modes:
+
+- `runtime-trace`: full Python authority baseline.
+- `primitive-merge`: Phase 7 path1/path2 primitive regression gate.
+- `rerank-merge`: current main path, where Go sends path1 raw candidates to
+  rerank-only sidecar scoring and merges locally with path2.
+
+Run all three demo gates with:
+
+```bash
+SIDECAR_URL=http://127.0.0.1:8765 scripts/run_demo_gates.sh
+```
+
+The script verifies `loader`, `chunk`, `triple`, and `full` for each mode and
+checks that the expected debug strategy is present:
+
+- `runtime-trace`: `python_triple_trace`
+- `primitive-merge`: `path1_path2_primitive_merge`
+- `rerank-merge`: `path1_rerank_path2_primitive_merge`
+
+Contract details live in `docs/contracts/sidecar_primitives.md` and
+`docs/contracts/retrieve_result.schema.json`.
+
 ## CI Gate
 
 The first CI gate should be permissive:
