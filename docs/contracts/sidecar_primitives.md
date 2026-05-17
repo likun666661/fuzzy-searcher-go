@@ -17,6 +17,11 @@ merge/sort/top-k locally.
 `rerank-merge` is the current preferred parity mode. `runtime-trace` and
 `primitive-merge` remain regression gates.
 
+Phase 9 narrows path1 further: Go should produce raw path1 candidates and call
+only `POST /v1/retrieval/rerank-triples` for scoring. The Python parity contract
+for Go-native raw candidate generation is documented in
+`docs/contracts/path1_candidate_generation.md`.
+
 ## `path1-triples/v1`
 
 Request:
@@ -42,6 +47,9 @@ Response fields Go consumes:
 - `raw_one_hop_triples`: raw caller-owned candidates for `rerank-merge`.
 - `reranked_triples`: Python-authoritative path1 output for
   `primitive-merge`.
+
+For Phase 9, `raw_one_hop_triples` is also the authority fixture for checking
+Go-native path1 candidate generation.
 
 ## `rerank-triples/v1`
 

@@ -200,4 +200,6 @@ should be `path1_rerank_path2_primitive_merge`.
 
 The retrieval output schema is tracked in
 `docs/contracts/retrieve_result.schema.json`; sidecar primitive boundaries are
-documented in `docs/contracts/sidecar_primitives.md`.
+documented in `docs/contracts/sidecar_primitives.md`. The Phase 9 Go-native
+path1 raw candidate parity contract is documented in
+`docs/contracts/path1_candidate_generation.md`.
