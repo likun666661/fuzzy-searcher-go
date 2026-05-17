@@ -33,6 +33,7 @@ type Config struct {
 	PythonBin        string
 	GoldenScript     string
 	BuildGraphScript string
+	AnswerScript     string
 	WorkerCWD        string
 	DatasetNames     []string
 	Path2Threshold   float64
@@ -65,6 +66,7 @@ func Load() Config {
 		PythonBin:        getenv("YOUTU_RAG_PYTHON", filepath.Join(artifactRoot, ".venv", "bin", "python")),
 		GoldenScript:     getenv("YOUTU_RAG_GOLDEN_SCRIPT", filepath.Join(artifactRoot, "scripts", "generate_retriever_golden.py")),
 		BuildGraphScript: getenv("YOUTU_RAG_BUILD_GRAPH_SCRIPT", filepath.Join(artifactRoot, "scripts", "build_graph_worker.py")),
+		AnswerScript:     getenv("YOUTU_RAG_ANSWER_SCRIPT", filepath.Join(artifactRoot, "scripts", "answer_worker.py")),
 		WorkerCWD:        getenv("YOUTU_RAG_WORKER_CWD", artifactRoot),
 		DatasetNames:     getenvList("YOUTU_RAG_DATASETS", []string{defaultDataset}),
 		Path2Threshold:   getenvFloat("YOUTU_RAG_PATH2_THRESHOLD", 0.1),

@@ -119,6 +119,25 @@ curl -s http://127.0.0.1:8080/v1/jobs/<job_id>/events
 curl -s -X POST http://127.0.0.1:8080/v1/jobs/<job_id>/cancel
 ```
 
+The same job envelope also supports Python-backed long-running workers for
+golden generation, graph construction, and final answer generation. The Go
+service owns job status, persistence, artifacts, and worker process execution;
+Python keeps the model-heavy logic:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/jobs \
+  -H 'content-type: application/json' \
+  -d '{
+    "type": "answer",
+    "answer": {
+      "dataset": "demo",
+      "question": "Who signed with Barcelona?",
+      "mode": "noagent",
+      "top_k": 20
+    }
+  }'
+```
+
 Dataset and artifact registry endpoints report what the service can see:
 
 ```bash
@@ -317,7 +336,7 @@ The retrieval output schema is tracked in
 `docs/contracts/retrieve_result.schema.json`; sidecar primitive boundaries are
 documented in `docs/contracts/sidecar_primitives.md`. The long-running service
 job contract is documented in `docs/contracts/service_jobs.md`; worker command
-contracts are documented in `docs/contracts/generate_golden_worker.md` and
-`docs/contracts/build_graph_worker.md`. The Phase 9 Go-native path1 raw
-candidate parity contract is documented in
-`docs/contracts/path1_candidate_generation.md`.
+contracts are documented in `docs/contracts/generate_golden_worker.md`,
+`docs/contracts/build_graph_worker.md`, and
+`docs/contracts/answer_worker.md`. The Phase 9 Go-native path1 raw candidate
+parity contract is documented in `docs/contracts/path1_candidate_generation.md`.

@@ -907,6 +907,207 @@ raise SystemExit(8)
 	}
 }
 
+func TestAnswerJobLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	graphPath := filepath.Join(dir, "output", "graphs", "demo_new.json")
+	chunksPath := filepath.Join(dir, "output", "chunks", "demo.txt")
+	answerPath := filepath.Join(dir, "output", "answers", "demo.json")
+	mustWrite(t, graphPath, "[]")
+	mustWrite(t, chunksPath, "id: c1\tChunk: hello\n")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import json
+import os
+import sys
+dataset = sys.argv[sys.argv.index("--dataset") + 1]
+question = sys.argv[sys.argv.index("--question") + 1]
+output = sys.argv[sys.argv.index("--output") + 1]
+os.makedirs(os.path.dirname(output), exist_ok=True)
+with open(output, "w", encoding="utf-8") as f:
+    json.dump({"schema_version": "answer-output/v1", "dataset": dataset, "question": question, "answer": "Barcelona"}, f)
+print(json.dumps({"ok": True, "output": output}))
+`)
+
+	cfg := config.Config{
+		DefaultDataset: "demo",
+		DefaultMode:    "native-path1-rerank",
+		ArtifactRoot:   dir,
+		GraphRoot:      filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:     filepath.Join(dir, "output", "chunks"),
+		JobRoot:        filepath.Join(dir, "jobs"),
+		PythonBin:      "python3",
+		AnswerScript:   scriptPath,
+		WorkerCWD:      dir,
+		DatasetNames:   []string{"demo"},
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"answer","answer":{"dataset":"demo","question":"Who signed?","top_k":5,"output_path":` + quote(answerPath) + `}}`)
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	for _, want := range []string{
+		`"type":"answer"`,
+		`"schema_version":"service-job/v1"`,
+		`"name":"graph"`,
+		`"name":"chunks"`,
+		`"name":"answer"`,
+		`"schema_version":"answer-output/v1"`,
+		`"status":"pending"`,
+	} {
+		if !strings.Contains(create.Body.String(), want) {
+			t.Fatalf("create job missing %s: %s", want, create.Body.String())
+		}
+	}
+	var createdJob map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &createdJob); err != nil {
+		t.Fatalf("decode created answer job: %v", err)
+	}
+	spec, ok := createdJob["spec"].(map[string]any)
+	if !ok ||
+		spec["dataset"] != "demo" ||
+		spec["question"] != "Who signed?" ||
+		spec["output_path"] != answerPath ||
+		spec["mode"] != "native-path1-rerank" ||
+		spec["top_k"] != float64(5) ||
+		spec["graph_path"] != graphPath ||
+		spec["chunks_path"] != chunksPath ||
+		spec["python_bin"] != "python3" ||
+		spec["script_path"] != scriptPath ||
+		spec["working_dir"] != dir {
+		t.Fatalf("created answer spec = %#v", createdJob["spec"])
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "succeeded")
+	result, ok := job["result"].(map[string]any)
+	if !ok || result["schema_version"] != "answer-result/v1" {
+		t.Fatalf("job result = %#v", job["result"])
+	}
+	if !containsArtifactStatus(job, "answer", "written") {
+		t.Fatalf("job answer artifact not written: %#v", job["artifacts"])
+	}
+	if _, err := os.Stat(answerPath); err != nil {
+		t.Fatalf("answer output missing: %v", err)
+	}
+
+	restarted := svc.NewService(cfg)
+	restartedRoutes := restarted.Routes()
+	loaded := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID, nil))
+	if loaded.Code != http.StatusOK {
+		t.Fatalf("loaded job status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+	if !strings.Contains(loaded.Body.String(), `"status":"succeeded"`) ||
+		!strings.Contains(loaded.Body.String(), `"status":"written"`) {
+		t.Fatalf("loaded job body = %s", loaded.Body.String())
+	}
+	events := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("loaded events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"worker_started"`) ||
+		!strings.Contains(events.Body.String(), `"artifact_answer_written"`) ||
+		!strings.Contains(events.Body.String(), `"succeeded"`) {
+		t.Fatalf("loaded events body = %s", events.Body.String())
+	}
+}
+
+func TestAnswerJobFailureMarksArtifactFailed(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import sys
+print("answer runtime failed", file=sys.stderr)
+raise SystemExit(6)
+`)
+
+	service := svc.NewService(config.Config{
+		DefaultDataset: "demo",
+		ArtifactRoot:   dir,
+		JobRoot:        filepath.Join(dir, "jobs"),
+		PythonBin:      "python3",
+		AnswerScript:   scriptPath,
+		WorkerCWD:      dir,
+	})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"answer","answer":{"dataset":"demo","question":"Who?"}}`)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "failed")
+	if errorText, _ := job["error"].(string); !strings.Contains(errorText, "answer runtime failed") {
+		t.Fatalf("job error = %#v", job["error"])
+	}
+	if !containsArtifactStatus(job, "answer", "failed") {
+		t.Fatalf("job artifacts not failed: %#v", job["artifacts"])
+	}
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"worker_started"`) ||
+		!strings.Contains(events.Body.String(), `"failed"`) ||
+		!strings.Contains(events.Body.String(), "answer runtime failed") {
+		t.Fatalf("events body = %s", events.Body.String())
+	}
+}
+
+func TestAnswerJobMissingOutputMarksArtifactMissing(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+print("ok but did not write answer")
+`)
+
+	service := svc.NewService(config.Config{
+		DefaultDataset: "demo",
+		ArtifactRoot:   dir,
+		JobRoot:        filepath.Join(dir, "jobs"),
+		PythonBin:      "python3",
+		AnswerScript:   scriptPath,
+		WorkerCWD:      dir,
+	})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"answer","answer":{"dataset":"demo","question":"Who?"}}`)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "failed")
+	if errorText, _ := job["error"].(string); !strings.Contains(errorText, "answer output missing") {
+		t.Fatalf("job error = %#v", job["error"])
+	}
+	if !containsArtifactStatus(job, "answer", "missing") {
+		t.Fatalf("job artifacts not missing: %#v", job["artifacts"])
+	}
+}
+
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }

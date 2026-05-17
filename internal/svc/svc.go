@@ -15,6 +15,7 @@ import (
 	"github.com/fuzzy-searcher-go/internal/jobs"
 	"github.com/fuzzy-searcher-go/internal/orchestrator"
 	"github.com/fuzzy-searcher-go/internal/sidecarstatus"
+	"github.com/fuzzy-searcher-go/internal/workers/answer"
 	"github.com/fuzzy-searcher-go/internal/workers/buildgraph"
 	"github.com/fuzzy-searcher-go/internal/workers/golden"
 )
@@ -181,6 +182,7 @@ type createJobRequest struct {
 	Retrieve       orchestrator.RetrieveInput `json:"retrieve,omitempty"`
 	GenerateGolden jobs.GenerateGoldenSpec    `json:"generate_golden,omitempty"`
 	BuildGraph     jobs.BuildGraphSpec        `json:"build_graph,omitempty"`
+	Answer         jobs.AnswerSpec            `json:"answer,omitempty"`
 }
 
 func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
@@ -249,6 +251,28 @@ func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 			} else {
 				recorder.Artifact("graph", "failed", "")
 				recorder.Artifact("chunks", "failed", "")
+			}
+			return result, err
+		})
+		writeJSON(w, http.StatusAccepted, job)
+	case jobs.TypeAnswer:
+		spec := s.answerSpec(input.Answer)
+		artifacts := answerArtifacts(spec)
+		job := s.jobs.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+			recorder.Event("worker_started", "answer Python worker started")
+			recorder.Artifact("answer", "running", "")
+			result, err := answer.Run(ctx, answer.Config{
+				PythonBin:  spec.PythonBin,
+				ScriptPath: spec.ScriptPath,
+				WorkingDir: spec.WorkingDir,
+			}, spec)
+			if err == nil {
+				recorder.Artifact("answer", "written", result.OutputPath)
+				recorder.Event("artifact_answer_written", "answer artifact written")
+			} else if errors.Is(err, answer.ErrMissingOutput) {
+				recorder.Artifact("answer", "missing", "")
+			} else {
+				recorder.Artifact("answer", "failed", "")
 			}
 			return result, err
 		})
@@ -438,6 +462,82 @@ func buildGraphArtifacts(spec jobs.BuildGraphSpec) []jobs.Artifact {
 			Description: "Vector cache directory prepared for retrieval indexing.",
 		},
 	}
+}
+
+func (s *Service) answerSpec(input jobs.AnswerSpec) jobs.AnswerSpec {
+	spec := input
+	if spec.Dataset == "" {
+		spec.Dataset = s.config.DefaultDataset
+	}
+	if spec.Dataset == "" {
+		spec.Dataset = "demo"
+	}
+	artifactPaths := map[string]string{}
+	for _, artifact := range artifacts.NewRegistry(s.config).Artifacts(spec.Dataset) {
+		artifactPaths[artifact.Name] = artifact.Path
+	}
+	if spec.OutputPath == "" {
+		spec.OutputPath = filepath.Join(s.config.ArtifactRoot, "output", "answers", spec.Dataset+".json")
+	}
+	if spec.Mode == "" {
+		spec.Mode = s.config.DefaultMode
+	}
+	if spec.TopK <= 0 {
+		spec.TopK = 20
+	}
+	if spec.GraphPath == "" {
+		spec.GraphPath = artifactPaths["graph"]
+	}
+	if spec.ChunksPath == "" {
+		spec.ChunksPath = artifactPaths["chunks"]
+	}
+	if spec.PythonBin == "" {
+		spec.PythonBin = s.config.PythonBin
+	}
+	if spec.ScriptPath == "" {
+		spec.ScriptPath = s.config.AnswerScript
+	}
+	if spec.WorkingDir == "" {
+		spec.WorkingDir = s.config.WorkerCWD
+	}
+	return spec
+}
+
+func answerArtifacts(spec jobs.AnswerSpec) []jobs.Artifact {
+	artifacts := []jobs.Artifact{}
+	if spec.GraphPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "graph",
+			Role:        "input",
+			Kind:        "graph_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.GraphPath,
+			Status:      "configured",
+			Description: "Graph JSON consumed by the answer worker.",
+		})
+	}
+	if spec.ChunksPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "chunks",
+			Role:        "input",
+			Kind:        "chunks_txt",
+			Dataset:     spec.Dataset,
+			Path:        spec.ChunksPath,
+			Status:      "configured",
+			Description: "Chunk text file consumed by the answer worker.",
+		})
+	}
+	artifacts = append(artifacts, jobs.Artifact{
+		Name:          "answer",
+		Role:          "output",
+		Kind:          "answer_json",
+		SchemaVersion: "answer-output/v1",
+		Dataset:       spec.Dataset,
+		Path:          spec.OutputPath,
+		Status:        "pending",
+		Description:   "Final answer JSON written by the answer worker.",
+	})
+	return artifacts
 }
 
 func (s *Service) handleJob(w http.ResponseWriter, r *http.Request) {

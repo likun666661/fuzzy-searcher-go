@@ -34,7 +34,7 @@ Stable fields:
 - `schema_version`: job envelope version. Current value is `service-job/v1`.
 - `id`: service-assigned job id.
 - `type`: job type. Current implemented types are `retrieve`,
-  `generate_golden`, and `build_graph`.
+  `generate_golden`, `build_graph`, and `answer`.
 - `status`: one of `queued`, `running`, `succeeded`, `failed`, `canceled`.
 - `spec`: typed request payload for the job type.
 - `artifacts`: input/output artifact metadata.
@@ -250,16 +250,62 @@ stdout/stderr. The large graph/chunks artifacts remain on disk.
 The detailed Python worker command contract is defined in
 `docs/contracts/build_graph_worker.md`.
 
-## Planned Job Types
+## Implemented Job: answer
 
-These types are named now so later work can extend the same contract instead of
-inventing a new shape:
+`answer` turns final answer generation into a tracked service job. Go owns the
+job envelope, lifecycle events, persistence, worker command execution,
+stdout/stderr capture, and artifact metadata. Python continues to own
+retrieval-time reasoning, decomposition/IRCoT/no-agent logic, prompts, LLM
+calls, and final answer file writing.
 
-- `answer`: retrieval plus decomposition/LLM answer generation.
+Submit:
 
-The first implementation may return `unsupported job type` for these until the
-worker is attached. The contract expectation is that each new type adds a typed
-`spec` and explicit input/output `artifacts`.
+```json
+{
+  "type": "answer",
+  "answer": {
+    "dataset": "demo",
+    "question": "Who signed with Barcelona?",
+    "mode": "noagent",
+    "top_k": 20,
+    "graph_path": "/abs/path/youtu-graphrag/output/graphs/demo_new.json",
+    "chunks_path": "/abs/path/youtu-graphrag/output/chunks/demo.txt",
+    "output_path": "/abs/path/youtu-graphrag/output/answers/demo.json"
+  }
+}
+```
+
+The service stores this as a typed `AnswerSpec` in `job.spec`. The resolved
+worker command fields are persisted with the job:
+
+```json
+{
+  "dataset": "demo",
+  "question": "Who signed with Barcelona?",
+  "output_path": "/abs/path/youtu-graphrag/output/answers/demo.json",
+  "mode": "noagent",
+  "top_k": 20,
+  "graph_path": "/abs/path/youtu-graphrag/output/graphs/demo_new.json",
+  "chunks_path": "/abs/path/youtu-graphrag/output/chunks/demo.txt",
+  "python_bin": "/abs/path/youtu-graphrag/.venv/bin/python",
+  "script_path": "/abs/path/youtu-graphrag/scripts/answer_worker.py",
+  "working_dir": "/abs/path/youtu-graphrag"
+}
+```
+
+`answer` jobs report these artifacts:
+
+- `graph`: optional input `graph_json`, status `configured`.
+- `chunks`: optional input `chunks_txt`, status `configured`.
+- `answer`: output `answer_json`, `schema_version=answer-output/v1`, starts
+  `pending`, moves to `written` after successful output validation.
+
+Completed jobs return a small inline `answer-result/v1` result with dataset,
+question, answer output path, and captured stdout/stderr. The answer payload
+itself remains on disk as the `answer` artifact.
+
+The detailed Python worker command contract is defined in
+`docs/contracts/answer_worker.md`.
 
 ## Persistence
 

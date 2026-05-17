@@ -112,6 +112,22 @@ type BuildGraphSpec struct {
 	WorkingDir       string `json:"working_dir,omitempty"`
 }
 
+// AnswerSpec is the typed job spec for Python answer-generation workers.
+type AnswerSpec struct {
+	Dataset       string `json:"dataset"`
+	Question      string `json:"question"`
+	OutputPath    string `json:"output_path"`
+	Mode          string `json:"mode,omitempty"`
+	TopK          int    `json:"top_k,omitempty"`
+	GraphPath     string `json:"graph_path,omitempty"`
+	ChunksPath    string `json:"chunks_path,omitempty"`
+	ConfigPath    string `json:"config_path,omitempty"`
+	InvolvedTypes string `json:"involved_types,omitempty"`
+	PythonBin     string `json:"python_bin,omitempty"`
+	ScriptPath    string `json:"script_path,omitempty"`
+	WorkingDir    string `json:"working_dir,omitempty"`
+}
+
 // Runner is the unit of work executed by the manager.
 type Runner func(context.Context, *Recorder) (any, error)
 
