@@ -1576,6 +1576,131 @@ with open(output, "w", encoding="utf-8") as f:
 	}
 }
 
+func TestCreateDatasetWorkflowLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	parseScript := filepath.Join(dir, "parse_worker.py")
+	buildScript := filepath.Join(dir, "build_worker.py")
+	document := filepath.Join(dir, "incoming", "doc.txt")
+	schemaPath := filepath.Join(dir, "incoming", "schema.json")
+	mustWrite(t, document, "hello dataset")
+	mustWrite(t, schemaPath, `{"entities":[]}`)
+	writeExecutable(t, parseScript, `#!/usr/bin/env python3
+import json
+import os
+import sys
+dataset = sys.argv[sys.argv.index("--dataset") + 1]
+output = sys.argv[sys.argv.index("--output") + 1]
+document = sys.argv[sys.argv.index("--document") + 1]
+os.makedirs(os.path.dirname(output), exist_ok=True)
+with open(output, "w", encoding="utf-8") as f:
+    json.dump([{"id": dataset + "-doc-1", "text": open(document, encoding="utf-8").read()}], f)
+`)
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import json
+import os
+import sys
+corpus = sys.argv[sys.argv.index("--corpus") + 1]
+schema = sys.argv[sys.argv.index("--schema") + 1]
+graph = sys.argv[sys.argv.index("--graph-output") + 1]
+chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
+cache = sys.argv[sys.argv.index("--cache-dir") + 1]
+if "data/uploaded/imported/corpus.json" not in corpus:
+    raise SystemExit("unexpected corpus path: " + corpus)
+if "schemas/imported.json" not in schema:
+    raise SystemExit("unexpected schema path: " + schema)
+os.makedirs(os.path.dirname(graph), exist_ok=True)
+os.makedirs(os.path.dirname(chunks), exist_ok=True)
+os.makedirs(cache, exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    json.dump([], f)
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: c1\tChunk: hello\n")
+`)
+	cfg := config.Config{
+		DefaultDataset:   "demo",
+		ArtifactRoot:     dir,
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		DatasetMetaRoot:  filepath.Join(dir, "output", "datasets"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		WorkflowRoot:     filepath.Join(dir, "workflows"),
+		PythonBin:        "python3",
+		ParseDocsScript:  parseScript,
+		BuildGraphScript: buildScript,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"create_dataset","create_dataset":{"dataset":"imported","document_paths":[` + quote(document) + `],"schema_path":` + quote(schemaPath) + `}}`)
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/workflows", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create workflow status = %d, body = %s", create.Code, create.Body.String())
+	}
+	for _, want := range []string{
+		`"type":"create_dataset"`,
+		`"name":"document_1"`,
+		`"name":"schema_source"`,
+		`"name":"parsed_corpus"`,
+		`"name":"corpus"`,
+		`"name":"schema"`,
+		`"name":"metadata"`,
+		`"name":"graph"`,
+		`"name":"chunks"`,
+		`"name":"cache"`,
+	} {
+		if !strings.Contains(create.Body.String(), want) {
+			t.Fatalf("create workflow missing %s: %s", want, create.Body.String())
+		}
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create workflow: %v", err)
+	}
+	workflow := waitForWorkflow(t, routes, created.ID, "succeeded")
+	if !containsWorkflowStep(workflow, "parse_documents", "parse_documents", "succeeded") ||
+		!containsWorkflowStep(workflow, "dataset_import", "dataset_import", "succeeded") ||
+		!containsWorkflowStep(workflow, "build_graph", "build_graph", "succeeded") {
+		t.Fatalf("workflow steps = %#v", workflow["steps"])
+	}
+	for _, name := range []string{"parsed_corpus", "corpus", "schema", "metadata", "graph", "chunks", "cache"} {
+		if !containsArtifactStatus(workflow, name, "written") {
+			t.Fatalf("workflow artifact %s not written: %#v", name, workflow["artifacts"])
+		}
+	}
+	result, ok := workflow["result"].(map[string]any)
+	if !ok || result["schema_version"] != "create-dataset-result/v1" {
+		t.Fatalf("workflow result = %#v", workflow["result"])
+	}
+	expectedPaths := []string{
+		filepath.Join(dir, "data", "uploaded", "imported", "corpus.json"),
+		filepath.Join(dir, "schemas", "imported.json"),
+		filepath.Join(dir, "output", "datasets", "imported.json"),
+		filepath.Join(dir, "output", "graphs", "imported_new.json"),
+		filepath.Join(dir, "output", "chunks", "imported.txt"),
+		filepath.Join(dir, "retriever", "faiss_cache_new", "imported"),
+	}
+	for _, path := range expectedPaths {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected workflow artifact %s: %v", path, err)
+		}
+	}
+
+	restartedRoutes := svc.NewService(cfg).Routes()
+	loaded := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+created.ID, nil))
+	if loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), `"type":"create_dataset"`) || !strings.Contains(loaded.Body.String(), `"status":"written"`) {
+		t.Fatalf("loaded workflow status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+}
+
 func TestWorkflowListAndStepInspectionEndpoints(t *testing.T) {
 	dir := t.TempDir()
 	buildScript := filepath.Join(dir, "build_worker.py")

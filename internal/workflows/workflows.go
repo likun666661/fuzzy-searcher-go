@@ -27,6 +27,7 @@ type Status string
 
 const (
 	TypeBuildAndAnswer = "build_and_answer"
+	TypeCreateDataset  = "create_dataset"
 )
 
 const (
@@ -89,6 +90,23 @@ type BuildAndAnswerSpec struct {
 	AnswerMode       string `json:"answer_mode,omitempty"`
 	TopK             int    `json:"top_k,omitempty"`
 	ConfigPath       string `json:"config_path,omitempty"`
+}
+
+// CreateDatasetSpec is the typed workflow spec for raw documents through graph
+// construction.
+type CreateDatasetSpec struct {
+	Dataset          string   `json:"dataset"`
+	DocumentPaths    []string `json:"document_paths"`
+	SchemaPath       string   `json:"schema_path"`
+	ParseOutputPath  string   `json:"parse_output_path,omitempty"`
+	CorpusOutputPath string   `json:"corpus_output_path,omitempty"`
+	GraphOutputPath  string   `json:"graph_output_path,omitempty"`
+	ChunksOutputPath string   `json:"chunks_output_path,omitempty"`
+	CacheDir         string   `json:"cache_dir,omitempty"`
+	ParseMode        string   `json:"parse_mode,omitempty"`
+	BuildMode        string   `json:"build_mode,omitempty"`
+	ConfigPath       string   `json:"config_path,omitempty"`
+	OverwriteImport  bool     `json:"overwrite,omitempty"`
 }
 
 // Runner is the unit of work executed by the workflow manager.

@@ -218,6 +218,7 @@ type createJobRequest struct {
 type createWorkflowRequest struct {
 	Type           string                       `json:"type"`
 	BuildAndAnswer workflows.BuildAndAnswerSpec `json:"build_and_answer,omitempty"`
+	CreateDataset  workflows.CreateDatasetSpec  `json:"create_dataset,omitempty"`
 }
 
 func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
@@ -676,6 +677,13 @@ func (s *Service) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 			return s.runBuildAndAnswerWorkflow(ctx, recorder, spec)
 		})
 		writeJSON(w, http.StatusAccepted, workflow)
+	case workflows.TypeCreateDataset:
+		spec := s.createDatasetSpec(input.CreateDataset)
+		artifacts := createDatasetArtifacts(spec)
+		workflow := s.workflows.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *workflows.Recorder) (any, error) {
+			return s.runCreateDatasetWorkflow(ctx, recorder, spec)
+		})
+		writeJSON(w, http.StatusAccepted, workflow)
 	case "":
 		writeError(w, http.StatusBadRequest, "invalid_workflow_type", fmt.Errorf("type is required"))
 	default:
@@ -783,6 +791,131 @@ func buildAndAnswerArtifacts(spec workflows.BuildAndAnswerSpec) []jobs.Artifact 
 	}
 }
 
+func (s *Service) createDatasetSpec(input workflows.CreateDatasetSpec) workflows.CreateDatasetSpec {
+	spec := input
+	if spec.Dataset == "" {
+		spec.Dataset = s.config.DefaultDataset
+	}
+	if spec.Dataset == "" {
+		spec.Dataset = "demo"
+	}
+	artifactPaths := map[string]string{}
+	for _, artifact := range artifacts.NewRegistry(s.config).Artifacts(spec.Dataset) {
+		artifactPaths[artifact.Name] = artifact.Path
+	}
+	if spec.CorpusOutputPath == "" {
+		spec.CorpusOutputPath = artifactPaths["corpus"]
+	}
+	if spec.ParseOutputPath == "" {
+		spec.ParseOutputPath = filepath.Join(s.config.ArtifactRoot, "output", "workflow_staging", spec.Dataset, "parsed_corpus.json")
+	}
+	if spec.GraphOutputPath == "" {
+		spec.GraphOutputPath = artifactPaths["graph"]
+	}
+	if spec.ChunksOutputPath == "" {
+		spec.ChunksOutputPath = artifactPaths["chunks"]
+	}
+	if spec.CacheDir == "" {
+		spec.CacheDir = artifactPaths["cache"]
+	}
+	return spec
+}
+
+func createDatasetArtifacts(spec workflows.CreateDatasetSpec) []jobs.Artifact {
+	artifacts := make([]jobs.Artifact, 0, len(spec.DocumentPaths)+6)
+	for idx, path := range spec.DocumentPaths {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        fmt.Sprintf("document_%d", idx+1),
+			Role:        "input",
+			Kind:        "source_document",
+			Dataset:     spec.Dataset,
+			Path:        path,
+			Status:      "configured",
+			Description: "Raw source document parsed by the parse_documents step.",
+		})
+	}
+	if spec.SchemaPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "schema_source",
+			Role:        "input",
+			Kind:        "schema_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.SchemaPath,
+			Status:      "configured",
+			Description: "Source schema imported for this dataset.",
+		})
+	}
+	artifacts = append(artifacts,
+		jobs.Artifact{
+			Name:          "parsed_corpus",
+			Role:          "output",
+			Kind:          "corpus_json",
+			SchemaVersion: "corpus-json/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.ParseOutputPath,
+			Status:        "pending",
+			Description:   "Corpus JSON produced by parse_documents and imported into the dataset.",
+		},
+		jobs.Artifact{
+			Name:          "corpus",
+			Role:          "output",
+			Kind:          "corpus_json",
+			SchemaVersion: "corpus-json/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.CorpusOutputPath,
+			Status:        "pending",
+			Description:   "Managed corpus JSON imported for this dataset.",
+		},
+		jobs.Artifact{
+			Name:          "schema",
+			Role:          "output",
+			Kind:          "schema_json",
+			SchemaVersion: "schema-json/v1",
+			Dataset:       spec.Dataset,
+			Status:        "pending",
+			Description:   "Managed schema JSON imported for this dataset.",
+		},
+		jobs.Artifact{
+			Name:          "metadata",
+			Role:          "output",
+			Kind:          "dataset_metadata_json",
+			SchemaVersion: datasetimport.SchemaVersion,
+			Dataset:       spec.Dataset,
+			Status:        "pending",
+			Description:   "Dataset import metadata written by the import step.",
+		},
+		jobs.Artifact{
+			Name:          "graph",
+			Role:          "output",
+			Kind:          "graph_json",
+			SchemaVersion: "youtu-graph/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.GraphOutputPath,
+			Status:        "pending",
+			Description:   "Knowledge graph written by the build_graph step.",
+		},
+		jobs.Artifact{
+			Name:        "chunks",
+			Role:        "output",
+			Kind:        "chunks_txt",
+			Dataset:     spec.Dataset,
+			Path:        spec.ChunksOutputPath,
+			Status:      "pending",
+			Description: "Chunk text file written by the build_graph step.",
+		},
+		jobs.Artifact{
+			Name:        "cache",
+			Role:        "output",
+			Kind:        "faiss_cache_dir",
+			Dataset:     spec.Dataset,
+			Path:        spec.CacheDir,
+			Status:      "pending",
+			Description: "Vector cache directory prepared by the build_graph step.",
+		},
+	)
+	return artifacts
+}
+
 func (s *Service) runBuildAndAnswerWorkflow(ctx context.Context, recorder *workflows.Recorder, spec workflows.BuildAndAnswerSpec) (any, error) {
 	buildSpec := s.buildGraphSpec(jobs.BuildGraphSpec{
 		Dataset:          spec.Dataset,
@@ -850,6 +983,144 @@ func (s *Service) runBuildAndAnswerWorkflow(ctx context.Context, recorder *workf
 		"chunks_output_path": buildSpec.ChunksOutputPath,
 		"cache_dir":          buildSpec.CacheDir,
 		"answer_output_path": answerSpec.OutputPath,
+	}, nil
+}
+
+func (s *Service) runCreateDatasetWorkflow(ctx context.Context, recorder *workflows.Recorder, spec workflows.CreateDatasetSpec) (any, error) {
+	parseSpec := s.parseDocumentsSpec(jobs.ParseDocumentsSpec{
+		Dataset:       spec.Dataset,
+		DocumentPaths: spec.DocumentPaths,
+		OutputPath:    spec.ParseOutputPath,
+		ConfigPath:    spec.ConfigPath,
+		Mode:          spec.ParseMode,
+	})
+	parseJob := s.submitParseDocumentsJob(parseSpec)
+	recorder.StepStarted("parse_documents", parseJob)
+	parseJob, err := s.waitForJob(ctx, parseJob.ID)
+	recorder.StepFinished("parse_documents", parseJob)
+	if err != nil {
+		return nil, err
+	}
+	if parseJob.Status != jobs.StatusSucceeded {
+		return map[string]any{
+			"schema_version":         "create-dataset-result/v1",
+			"parse_documents_job_id": parseJob.ID,
+		}, fmt.Errorf("parse_documents step failed: %s", parseJob.Error)
+	}
+	recorder.Artifact("parsed_corpus", "written", parseSpec.OutputPath)
+
+	importStarted := time.Now().UTC()
+	importJob := jobs.Job{
+		Type:      "dataset_import",
+		Status:    jobs.StatusRunning,
+		StartedAt: &importStarted,
+		Artifacts: []jobs.Artifact{
+			{
+				Name:        "corpus",
+				Role:        "input",
+				Kind:        "corpus_json",
+				Dataset:     spec.Dataset,
+				Path:        parseSpec.OutputPath,
+				Status:      "configured",
+				Description: "Parsed corpus imported into the dataset registry.",
+			},
+			{
+				Name:        "schema_source",
+				Role:        "input",
+				Kind:        "schema_json",
+				Dataset:     spec.Dataset,
+				Path:        spec.SchemaPath,
+				Status:      "configured",
+				Description: "Source schema imported into the dataset registry.",
+			},
+		},
+	}
+	recorder.StepStarted("dataset_import", importJob)
+	metadata, err := datasetimport.Import(s.config, datasetimport.Request{
+		Dataset:    spec.Dataset,
+		CorpusPath: parseSpec.OutputPath,
+		SchemaPath: spec.SchemaPath,
+		Overwrite:  spec.OverwriteImport,
+	})
+	if err != nil {
+		finished := time.Now().UTC()
+		importJob.Status = jobs.StatusFailed
+		importJob.FinishedAt = &finished
+		importJob.Error = err.Error()
+		recorder.StepFinished("dataset_import", importJob)
+		recorder.Artifact("metadata", "failed", "")
+		recorder.Event("dataset_import_failed", err.Error())
+		return map[string]any{
+			"schema_version":         "create-dataset-result/v1",
+			"parse_documents_job_id": parseJob.ID,
+		}, fmt.Errorf("dataset import step failed: %w", err)
+	}
+	metadataPath := ""
+	importedCorpusPath := parseSpec.OutputPath
+	importedSchemaPath := spec.SchemaPath
+	importJob.Artifacts = append(importJob.Artifacts, metadata.Artifacts...)
+	for _, artifact := range metadata.Artifacts {
+		switch artifact.Name {
+		case "corpus":
+			importedCorpusPath = artifact.Path
+			recorder.Artifact("corpus", "written", artifact.Path)
+		case "schema":
+			importedSchemaPath = artifact.Path
+			recorder.Artifact("schema", "written", artifact.Path)
+		case "metadata":
+			metadataPath = artifact.Path
+			recorder.Artifact("metadata", "written", artifact.Path)
+		}
+	}
+	finished := time.Now().UTC()
+	importJob.Status = jobs.StatusSucceeded
+	importJob.FinishedAt = &finished
+	recorder.StepFinished("dataset_import", importJob)
+	recorder.Event("dataset_imported", "dataset corpus/schema metadata imported")
+	recorder.Event("artifact_handoff", "parse_documents corpus imported for build_graph")
+
+	buildSpec := s.buildGraphSpec(jobs.BuildGraphSpec{
+		Dataset:          spec.Dataset,
+		CorpusPath:       importedCorpusPath,
+		SchemaPath:       importedSchemaPath,
+		GraphOutputPath:  spec.GraphOutputPath,
+		ChunksOutputPath: spec.ChunksOutputPath,
+		CacheDir:         spec.CacheDir,
+		ConfigPath:       spec.ConfigPath,
+		Mode:             spec.BuildMode,
+	})
+	buildJob := s.submitBuildGraphJob(buildSpec)
+	recorder.StepStarted("build_graph", buildJob)
+	buildJob, err = s.waitForJob(ctx, buildJob.ID)
+	recorder.StepFinished("build_graph", buildJob)
+	if err != nil {
+		return nil, err
+	}
+	if buildJob.Status != jobs.StatusSucceeded {
+		return map[string]any{
+			"schema_version":         "create-dataset-result/v1",
+			"parse_documents_job_id": parseJob.ID,
+			"build_graph_job_id":     buildJob.ID,
+			"metadata_path":          metadataPath,
+		}, fmt.Errorf("build_graph step failed: %s", buildJob.Error)
+	}
+	recorder.Artifact("graph", "written", buildSpec.GraphOutputPath)
+	recorder.Artifact("chunks", "written", buildSpec.ChunksOutputPath)
+	if buildSpec.CacheDir != "" {
+		recorder.Artifact("cache", "written", buildSpec.CacheDir)
+	}
+
+	return map[string]any{
+		"schema_version":         "create-dataset-result/v1",
+		"dataset":                spec.Dataset,
+		"parse_documents_job_id": parseJob.ID,
+		"build_graph_job_id":     buildJob.ID,
+		"corpus_path":            buildSpec.CorpusPath,
+		"schema_path":            buildSpec.SchemaPath,
+		"metadata_path":          metadataPath,
+		"graph_output_path":      buildSpec.GraphOutputPath,
+		"chunks_output_path":     buildSpec.ChunksOutputPath,
+		"cache_dir":              buildSpec.CacheDir,
 	}, nil
 }
 

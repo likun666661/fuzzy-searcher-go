@@ -155,6 +155,7 @@ func TestManagerMarksStaleRunningWorkflowsInterrupted(t *testing.T) {
 		t.Fatalf("events = %#v", events)
 	}
 	close(block)
+	_ = waitForStatus(t, manager, workflow.ID, workflows.StatusSucceeded)
 }
 
 func waitForStatus(t *testing.T, manager *workflows.Manager, id string, want workflows.Status) workflows.Workflow {
