@@ -119,20 +119,53 @@ func TestDatasetImportEndpoint(t *testing.T) {
 	root := t.TempDir()
 	sourceCorpus := filepath.Join(root, "incoming", "corpus.json")
 	sourceSchema := filepath.Join(root, "incoming", "schema.json")
+	badSchema := filepath.Join(root, "incoming", "bad_schema.json")
+	buildScript := filepath.Join(root, "workers", "build_graph.py")
 	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
 	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	mustWrite(t, badSchema, `{"entities":`)
+	mustMkdir(t, filepath.Dir(buildScript))
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import json
+import os
+import sys
+
+def value(flag):
+    return sys.argv[sys.argv.index(flag) + 1]
+
+dataset = value("--dataset")
+corpus = value("--corpus")
+schema = value("--schema")
+graph = value("--graph-output")
+chunks = value("--chunks-output")
+cache = value("--cache-dir")
+assert dataset == "imported", dataset
+assert corpus.endswith("data/uploaded/imported/corpus.json"), corpus
+assert schema.endswith("schemas/imported.json"), schema
+os.makedirs(os.path.dirname(graph), exist_ok=True)
+os.makedirs(os.path.dirname(chunks), exist_ok=True)
+os.makedirs(cache, exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    json.dump([], f)
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: c1\tChunk: hello\n")
+`)
 	cfg := config.Config{
-		ArtifactRoot:    root,
-		DefaultDataset:  "demo",
-		CorpusRoot:      filepath.Join(root, "data"),
-		SchemaRoot:      filepath.Join(root, "schemas"),
-		GraphRoot:       filepath.Join(root, "output", "graphs"),
-		ChunksRoot:      filepath.Join(root, "output", "chunks"),
-		CacheRoot:       filepath.Join(root, "retriever", "faiss_cache_new"),
-		GoldenRoot:      filepath.Join(root, "output", "retrieval_golden"),
-		TraceRoot:       filepath.Join(root, "output", "retrieval_traces"),
-		DatasetMetaRoot: filepath.Join(root, "output", "datasets"),
-		DatasetNames:    []string{"demo"},
+		ArtifactRoot:     root,
+		DefaultDataset:   "demo",
+		CorpusRoot:       filepath.Join(root, "data"),
+		SchemaRoot:       filepath.Join(root, "schemas"),
+		GraphRoot:        filepath.Join(root, "output", "graphs"),
+		ChunksRoot:       filepath.Join(root, "output", "chunks"),
+		CacheRoot:        filepath.Join(root, "retriever", "faiss_cache_new"),
+		GoldenRoot:       filepath.Join(root, "output", "retrieval_golden"),
+		TraceRoot:        filepath.Join(root, "output", "retrieval_traces"),
+		DatasetMetaRoot:  filepath.Join(root, "output", "datasets"),
+		JobRoot:          filepath.Join(root, "jobs"),
+		PythonBin:        "python3",
+		BuildGraphScript: buildScript,
+		WorkerCWD:        root,
+		DatasetNames:     []string{"demo"},
 	}
 	service := svc.NewService(cfg)
 	routes := service.Routes()
@@ -177,6 +210,33 @@ func TestDatasetImportEndpoint(t *testing.T) {
 	if loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), `"name":"metadata"`) || !strings.Contains(loaded.Body.String(), `"exists":true`) {
 		t.Fatalf("loaded import artifacts status = %d, body = %s", loaded.Code, loaded.Body.String())
 	}
+	loadedDataset := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(loadedDataset, httptest.NewRequest(http.MethodGet, "/v1/datasets/imported", nil))
+	if loadedDataset.Code != http.StatusOK ||
+		!strings.Contains(loadedDataset.Body.String(), `"name":"imported"`) ||
+		!strings.Contains(loadedDataset.Body.String(), `"name":"corpus"`) ||
+		!strings.Contains(loadedDataset.Body.String(), `"name":"metadata"`) {
+		t.Fatalf("loaded import dataset status = %d, body = %s", loadedDataset.Code, loadedDataset.Body.String())
+	}
+
+	build := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(build, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"build_graph","build_graph":{"dataset":"imported"}}`)))
+	if build.Code != http.StatusAccepted {
+		t.Fatalf("imported build_graph job status = %d, body = %s", build.Code, build.Body.String())
+	}
+	var buildJob struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(build.Body.Bytes(), &buildJob); err != nil || buildJob.ID == "" {
+		t.Fatalf("decode imported build_graph job: id=%q err=%v body=%s", buildJob.ID, err, build.Body.String())
+	}
+	finishedBuild := waitForServiceJob(t, restartedRoutes, buildJob.ID, "succeeded")
+	if !containsArtifactStatus(finishedBuild, "corpus", "configured") ||
+		!containsArtifactStatus(finishedBuild, "schema", "configured") ||
+		!strings.Contains(toJSON(t, finishedBuild["spec"]), filepath.Join(root, "data", "uploaded", "imported", "corpus.json")) ||
+		!strings.Contains(toJSON(t, finishedBuild["spec"]), filepath.Join(root, "schemas", "imported.json")) {
+		t.Fatalf("imported build_graph job did not consume managed artifacts: %#v", finishedBuild)
+	}
 
 	duplicate := httptest.NewRecorder()
 	routes.ServeHTTP(duplicate, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"imported","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
@@ -187,6 +247,14 @@ func TestDatasetImportEndpoint(t *testing.T) {
 	routes.ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"../bad","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
 	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "invalid_dataset") {
 		t.Fatalf("invalid import status = %d, body = %s", invalid.Code, invalid.Body.String())
+	}
+	badJSON := httptest.NewRecorder()
+	routes.ServeHTTP(badJSON, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"badjson","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(badSchema)+`}`)))
+	if badJSON.Code != http.StatusBadRequest || !strings.Contains(badJSON.Body.String(), "dataset_import_failed") || !strings.Contains(badJSON.Body.String(), "parse schema json") {
+		t.Fatalf("bad schema import status = %d, body = %s", badJSON.Code, badJSON.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "output", "datasets", "badjson.json")); !os.IsNotExist(err) {
+		t.Fatalf("bad schema import should not persist metadata, stat err = %v", err)
 	}
 }
 
@@ -1706,6 +1774,15 @@ func createBuildAndAnswerWorkflow(t *testing.T, routes http.Handler, dataset str
 
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+}
+
+func toJSON(t *testing.T, value any) string {
+	t.Helper()
+	body, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal value: %v", err)
+	}
+	return string(body)
 }
 
 func containsArtifactStatus(job map[string]any, name string, status string) bool {
