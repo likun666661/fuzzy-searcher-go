@@ -470,6 +470,8 @@ with open(chunks, "w", encoding="utf-8") as f:
 	mustWrite(t, staleChunks, "stale")
 	mustWrite(t, staleCache, "stale")
 	mustWrite(t, filepath.Join(root, "output", "retrieval_golden", "imported.json"), `{"schema_version":"retriever-golden/v1"}`)
+	mustWrite(t, filepath.Join(root, "output", "retrieval_traces", "imported_triple_trace.json"), `{"schema_version":"triple-trace/v1"}`)
+	mustWrite(t, filepath.Join(root, "output", "answers", "imported.json"), `{"schema_version":"answer-output/v1"}`)
 
 	dryRun := httptest.NewRecorder()
 	routes.ServeHTTP(dryRun, httptest.NewRequest(http.MethodPost, "/v1/datasets/imported/rebuild", bytes.NewBufferString(`{"dry_run":true}`)))
@@ -481,6 +483,12 @@ with open(chunks, "w", encoding="utf-8") as f:
 	}
 	if _, err := os.Stat(staleGraph); err != nil {
 		t.Fatalf("dry-run should not remove graph: %v", err)
+	}
+	if _, err := os.Stat(staleChunks); err != nil {
+		t.Fatalf("dry-run should not remove chunks: %v", err)
+	}
+	if _, err := os.Stat(staleCache); err != nil {
+		t.Fatalf("dry-run should not remove cache: %v", err)
 	}
 
 	conflict := httptest.NewRecorder()
@@ -510,11 +518,45 @@ with open(chunks, "w", encoding="utf-8") as f:
 	if _, err := os.Stat(filepath.Join(root, "output", "retrieval_golden", "imported.json")); err != nil {
 		t.Fatalf("rebuild should preserve golden fixture: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(root, "output", "retrieval_traces", "imported_triple_trace.json")); err != nil {
+		t.Fatalf("rebuild should preserve triple trace: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "output", "answers", "imported.json")); err != nil {
+		t.Fatalf("rebuild should preserve answer output: %v", err)
+	}
+	loadedJob := httptest.NewRecorder()
+	svc.NewService(cfg).Routes().ServeHTTP(loadedJob, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+rebuild.JobID, nil))
+	if loadedJob.Code != http.StatusOK ||
+		!strings.Contains(loadedJob.Body.String(), `"type":"build_graph"`) ||
+		!strings.Contains(loadedJob.Body.String(), `"status":"written"`) ||
+		!strings.Contains(loadedJob.Body.String(), filepath.Join(root, "data", "uploaded", "imported", "corpus.json")) ||
+		!strings.Contains(loadedJob.Body.String(), filepath.Join(root, "schemas", "imported.json")) {
+		t.Fatalf("restarted rebuild job status = %d, body = %s", loadedJob.Code, loadedJob.Body.String())
+	}
 
 	notManaged := httptest.NewRecorder()
 	routes.ServeHTTP(notManaged, httptest.NewRequest(http.MethodPost, "/v1/datasets/orphan/rebuild", bytes.NewBufferString(`{}`)))
 	if notManaged.Code != http.StatusNotFound || !strings.Contains(notManaged.Body.String(), "dataset_not_managed") {
 		t.Fatalf("not managed rebuild status = %d, body = %s", notManaged.Code, notManaged.Body.String())
+	}
+	invalid := httptest.NewRecorder()
+	routes.ServeHTTP(invalid, httptest.NewRequest(http.MethodPost, "/v1/datasets/bad$name/rebuild", bytes.NewBufferString(`{}`)))
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "invalid_dataset") {
+		t.Fatalf("invalid rebuild status = %d, body = %s", invalid.Code, invalid.Body.String())
+	}
+
+	missingSchemaImport := httptest.NewRecorder()
+	routes.ServeHTTP(missingSchemaImport, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"missing_schema","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
+	if missingSchemaImport.Code != http.StatusCreated {
+		t.Fatalf("missing_schema import status = %d, body = %s", missingSchemaImport.Code, missingSchemaImport.Body.String())
+	}
+	if err := os.Remove(filepath.Join(root, "schemas", "missing_schema.json")); err != nil {
+		t.Fatalf("remove managed schema: %v", err)
+	}
+	missingSchema := httptest.NewRecorder()
+	routes.ServeHTTP(missingSchema, httptest.NewRequest(http.MethodPost, "/v1/datasets/missing_schema/rebuild", bytes.NewBufferString(`{}`)))
+	if missingSchema.Code != http.StatusConflict || !strings.Contains(missingSchema.Body.String(), "dataset_not_ready") {
+		t.Fatalf("missing schema rebuild status = %d, body = %s", missingSchema.Code, missingSchema.Body.String())
 	}
 }
 
