@@ -345,11 +345,60 @@ func TestDatasetDeleteEndpoint(t *testing.T) {
 	if notManaged.Code != http.StatusNotFound || !strings.Contains(notManaged.Body.String(), "dataset_not_managed") {
 		t.Fatalf("not managed delete status = %d, body = %s", notManaged.Code, notManaged.Body.String())
 	}
-	mustWrite(t, filepath.Join(root, "data", "uploaded", "orphan", "corpus.json"), `[]`)
+	invalid := httptest.NewRecorder()
+	routes.ServeHTTP(invalid, httptest.NewRequest(http.MethodDelete, "/v1/datasets/bad$name", nil))
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "invalid_dataset") {
+		t.Fatalf("invalid delete status = %d, body = %s", invalid.Code, invalid.Body.String())
+	}
+
+	scoped := httptest.NewRecorder()
+	routes.ServeHTTP(scoped, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"scoped","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
+	if scoped.Code != http.StatusCreated {
+		t.Fatalf("scoped import status = %d, body = %s", scoped.Code, scoped.Body.String())
+	}
+	scopedCore := []string{
+		filepath.Join(root, "data", "uploaded", "scoped", "corpus.json"),
+		filepath.Join(root, "schemas", "scoped.json"),
+		filepath.Join(root, "output", "datasets", "scoped.json"),
+	}
+	scopedOutputs := []string{
+		filepath.Join(root, "output", "graphs", "scoped_new.json"),
+		filepath.Join(root, "output", "chunks", "scoped.txt"),
+		filepath.Join(root, "retriever", "faiss_cache_new", "scoped", "index.faiss"),
+		filepath.Join(root, "output", "retrieval_golden", "scoped.json"),
+		filepath.Join(root, "output", "retrieval_traces", "scoped_triple_trace.json"),
+		filepath.Join(root, "output", "answers", "scoped.json"),
+	}
+	for _, path := range scopedOutputs {
+		mustWrite(t, path, "{}")
+	}
+	scopedDelete := httptest.NewRecorder()
+	routes.ServeHTTP(scopedDelete, httptest.NewRequest(http.MethodDelete, "/v1/datasets/scoped?include_outputs=false", nil))
+	if scopedDelete.Code != http.StatusOK ||
+		!strings.Contains(scopedDelete.Body.String(), `"include_outputs":false`) ||
+		!strings.Contains(scopedDelete.Body.String(), `"status":"skipped"`) {
+		t.Fatalf("scoped delete status = %d, body = %s", scopedDelete.Code, scopedDelete.Body.String())
+	}
+	for _, path := range scopedCore {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("scoped core artifact should be deleted %s, stat err = %v", path, err)
+		}
+	}
+	for _, path := range scopedOutputs {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("scoped output artifact should remain %s: %v", path, err)
+		}
+	}
+
+	orphanCorpus := filepath.Join(root, "data", "uploaded", "orphan", "corpus.json")
+	mustWrite(t, orphanCorpus, `[]`)
 	forced := httptest.NewRecorder()
 	routes.ServeHTTP(forced, httptest.NewRequest(http.MethodDelete, "/v1/datasets/orphan?force=true&include_outputs=false", nil))
 	if forced.Code != http.StatusOK || !strings.Contains(forced.Body.String(), `"include_outputs":false`) || !strings.Contains(forced.Body.String(), `"status":"skipped"`) {
 		t.Fatalf("forced scoped delete status = %d, body = %s", forced.Code, forced.Body.String())
+	}
+	if _, err := os.Stat(orphanCorpus); !os.IsNotExist(err) {
+		t.Fatalf("forced orphan corpus should be deleted, stat err = %v", err)
 	}
 }
 
