@@ -261,6 +261,16 @@ On startup:
 - queued/running workflows are marked `failed` with an `interrupted` event
   until a durable resume executor exists.
 
+## Dataset Operation History
+
+Dataset-impacting workflows such as `create_dataset` should write
+`dataset-operation/v1` records once Phase 21 operation history is enabled. The
+operation record should include the workflow reference, sanitized request,
+terminal status, and workflow artifact summary.
+
+Detailed operation history contract:
+`docs/contracts/dataset_operations.md`.
+
 ## Failure Semantics
 
 For the first version:

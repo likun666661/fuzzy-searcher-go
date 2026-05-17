@@ -269,6 +269,16 @@ Recommended HTTP mapping:
 - output conflict: `409`
 - cleanup/submission failure: `500`
 
+## Operation History
+
+Dataset delete and rebuild operations should write `dataset-operation/v1`
+records once Phase 21 operation history is enabled. The operation record should
+capture the sanitized request, artifact statuses, and build job reference when
+rebuild submits a `build_graph` job.
+
+Detailed operation history contract:
+`docs/contracts/dataset_operations.md`.
+
 ## Acceptance Criteria
 
 Phase 19 validation should verify:

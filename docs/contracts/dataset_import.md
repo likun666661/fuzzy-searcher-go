@@ -102,6 +102,16 @@ The existing `build_graph` job and `build_and_answer` workflow resolve the
 imported corpus/schema paths from the artifact registry. No Python graph
 construction logic changes are required.
 
+## Operation History
+
+Dataset import should write a `dataset-operation/v1` record once Phase 21
+operation history is enabled. The operation record should include sanitized
+request fields and the corpus/schema/metadata artifacts returned by
+`dataset-import/v1`.
+
+Detailed operation history contract:
+`docs/contracts/dataset_operations.md`.
+
 ## Errors
 
 Stable error codes:
