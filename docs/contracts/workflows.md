@@ -1,7 +1,8 @@
 # Workflow Contract
 
 Workflows sit above service jobs. A job runs one unit of work, such as
-`build_graph` or `answer`. A workflow coordinates multiple jobs into a product
+`parse_documents`, `build_graph`, or `answer`. A workflow coordinates multiple
+jobs and service operations into a product
 operation with explicit step status, child job references, artifact handoff,
 failure semantics, cancellation, and restart behavior.
 
@@ -67,7 +68,7 @@ Stable fields:
 - `output_artifacts`: artifact metadata produced by this step.
 - `error`: child step error when failed.
 
-## First Workflow: build_and_answer
+## Implemented Workflow: build_and_answer
 
 The first workflow should chain:
 
@@ -103,6 +104,46 @@ Required minimal fields:
 The service can resolve artifact paths from the dataset registry when optional
 paths are omitted.
 
+## Implemented Workflow: create_dataset
+
+`create_dataset` turns raw documents plus a schema into a registered,
+graph-built dataset.
+
+It chains:
+
+```text
+parse_documents -> dataset_import -> build_graph
+```
+
+Submit:
+
+```json
+{
+  "type": "create_dataset",
+  "create_dataset": {
+    "dataset": "news_2026",
+    "document_paths": [
+      "/abs/path/incoming/a.pdf",
+      "/abs/path/incoming/b.md"
+    ],
+    "schema_path": "/abs/path/incoming/schema.json",
+    "overwrite": false
+  }
+}
+```
+
+Required minimal fields:
+
+- `dataset`
+- `document_paths`
+- `schema_path`
+
+The service can resolve corpus, graph, chunks, and cache output paths from the
+configured artifact roots when optional paths are omitted.
+
+The detailed `create_dataset` workflow contract is defined in
+`docs/contracts/create_dataset_workflow.md`.
+
 ## Artifact Handoff
 
 The workflow must record how artifacts move between steps.
@@ -114,6 +155,16 @@ For `build_and_answer`:
 - `build_graph.cache` output is retained as workflow artifact metadata for
   sidecar/cache diagnostics.
 - `answer.answer` output becomes the final workflow answer artifact.
+
+For `create_dataset`:
+
+- request `document_paths` become `parse_documents.document_*` inputs.
+- `parse_documents.corpus` output becomes `dataset_import.corpus_path`.
+- request `schema_path` becomes `dataset_import.schema_path`.
+- `dataset_import.corpus` and `dataset_import.schema` become
+  `build_graph.corpus_path` and `build_graph.schema_path`.
+- `build_graph.graph`, `build_graph.chunks`, and `build_graph.cache` become
+  final workflow output artifacts.
 
 The handoff is part of the contract. Tests should not need to infer it from
 filesystem paths alone.
@@ -216,6 +267,12 @@ For the first version:
 
 - If `build_graph` fails, stop and do not submit `answer`.
 - If `answer` fails, mark workflow failed but preserve build artifacts.
+- If `parse_documents` fails in `create_dataset`, stop and do not import or
+  build.
+- If `dataset_import` fails in `create_dataset`, stop and do not submit
+  `build_graph`.
+- If `build_graph` fails in `create_dataset`, preserve imported
+  corpus/schema/metadata artifacts.
 - If a child job fails, copy a useful error string to the workflow `error`.
 - If the workflow is canceled while a child job is running, cancel the child
   job and mark workflow canceled.
@@ -231,6 +288,7 @@ Expected events:
 - `step_succeeded`
 - `step_failed`
 - `artifact_handoff`
+- `dataset_imported`
 - `succeeded`, `failed`, `canceled`, or `interrupted`
 
 Events should be enough for clients to show progress without scraping child
@@ -248,15 +306,23 @@ Workflow validation should cover:
   - graph/chunks/cache from build step appear as workflow artifacts.
   - graph/chunks are passed into answer step.
   - answer output is the final workflow output artifact.
+  - source documents and schema appear in `create_dataset` artifacts.
+  - parsed corpus is handed to dataset import.
+  - imported corpus/schema/metadata are handed to build graph.
 - lifecycle:
   - success path runs both child jobs in order.
   - build failure prevents answer submission.
   - answer failure preserves build artifacts and fails the workflow.
+  - `create_dataset` success runs parse/import/build in order.
+  - parse failure prevents import and build.
+  - import failure prevents build.
+  - build failure preserves imported corpus/schema/metadata.
   - cancellation propagates to running child job.
   - restart readback works for completed workflows.
   - stale running workflow becomes failed/interrupted on restart.
 - worker validation:
-  - existing `build_graph` and `answer` job gates continue to pass.
+  - existing `parse_documents`, dataset import, `build_graph`, and `answer`
+    gates continue to pass.
 - smoke:
   - existing `make test` and demo gate scripts continue to pass.
 
