@@ -1108,6 +1108,49 @@ print("ok but did not write answer")
 	}
 }
 
+func TestAnswerJobBadOutputSchemaMarksArtifactFailed(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import json
+import os
+import sys
+output = sys.argv[sys.argv.index("--output") + 1]
+os.makedirs(os.path.dirname(output), exist_ok=True)
+with open(output, "w", encoding="utf-8") as f:
+    json.dump({"schema_version": "not-answer/v1"}, f)
+`)
+
+	service := svc.NewService(config.Config{
+		DefaultDataset: "demo",
+		ArtifactRoot:   dir,
+		JobRoot:        filepath.Join(dir, "jobs"),
+		PythonBin:      "python3",
+		AnswerScript:   scriptPath,
+		WorkerCWD:      dir,
+	})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"answer","answer":{"dataset":"demo","question":"Who?"}}`)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "failed")
+	if errorText, _ := job["error"].(string); !strings.Contains(errorText, `unexpected answer schema_version "not-answer/v1"`) {
+		t.Fatalf("job error = %#v", job["error"])
+	}
+	if !containsArtifactStatus(job, "answer", "failed") {
+		t.Fatalf("job artifacts not failed: %#v", job["artifacts"])
+	}
+}
+
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }
