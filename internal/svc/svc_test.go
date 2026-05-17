@@ -1361,6 +1361,11 @@ with open(output, "w", encoding="utf-8") as f:
 	if missing.Code != http.StatusNotFound || !strings.Contains(missing.Body.String(), "workflow_step_not_found") {
 		t.Fatalf("missing workflow step status = %d, body = %s", missing.Code, missing.Body.String())
 	}
+	missingWorkflow := httptest.NewRecorder()
+	routes.ServeHTTP(missingWorkflow, httptest.NewRequest(http.MethodGet, "/v1/workflows/missing/steps", nil))
+	if missingWorkflow.Code != http.StatusNotFound || !strings.Contains(missingWorkflow.Body.String(), "workflow_not_found") {
+		t.Fatalf("missing workflow steps status = %d, body = %s", missingWorkflow.Code, missingWorkflow.Body.String())
+	}
 
 	restarted := svc.NewService(cfg)
 	restartedRoutes := restarted.Routes()
@@ -1412,6 +1417,22 @@ pathlib.Path("`+answerMarker+`").write_text("called", encoding="utf-8")
 		t.Fatalf("answer worker should not have been called; stat err = %v", err)
 	}
 
+	steps := httptest.NewRecorder()
+	routes.ServeHTTP(steps, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/steps", nil))
+	if steps.Code != http.StatusOK {
+		t.Fatalf("workflow steps status = %d, body = %s", steps.Code, steps.Body.String())
+	}
+	for _, want := range []string{`"schema_version":"workflow-steps/v1"`, `"count":1`, `"name":"build_graph"`, `"status":"failed"`, "build exploded"} {
+		if !strings.Contains(steps.Body.String(), want) {
+			t.Fatalf("workflow failed steps missing %s: %s", want, steps.Body.String())
+		}
+	}
+	answerStep := httptest.NewRecorder()
+	routes.ServeHTTP(answerStep, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/steps/answer", nil))
+	if answerStep.Code != http.StatusNotFound || !strings.Contains(answerStep.Body.String(), "workflow_step_not_found") {
+		t.Fatalf("answer step after build failure status = %d, body = %s", answerStep.Code, answerStep.Body.String())
+	}
+
 	events := httptest.NewRecorder()
 	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/events", nil))
 	if events.Code != http.StatusOK {
@@ -1457,6 +1478,22 @@ raise SystemExit(5)
 	}
 	if containsArtifactStatus(workflow, "answer", "written") {
 		t.Fatalf("answer artifact should not be written: %#v", workflow["artifacts"])
+	}
+
+	answerStep := httptest.NewRecorder()
+	routes.ServeHTTP(answerStep, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/steps/answer", nil))
+	if answerStep.Code != http.StatusOK {
+		t.Fatalf("answer step status = %d, body = %s", answerStep.Code, answerStep.Body.String())
+	}
+	for _, want := range []string{`"schema_version":"workflow-step/v1"`, `"name":"answer"`, `"status":"failed"`, "answer exploded"} {
+		if !strings.Contains(answerStep.Body.String(), want) {
+			t.Fatalf("answer failed step missing %s: %s", want, answerStep.Body.String())
+		}
+	}
+	buildStep := httptest.NewRecorder()
+	routes.ServeHTTP(buildStep, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/steps/build_graph", nil))
+	if buildStep.Code != http.StatusOK || !strings.Contains(buildStep.Body.String(), `"status":"succeeded"`) || !strings.Contains(buildStep.Body.String(), `"output_artifacts"`) {
+		t.Fatalf("build step after answer failure status = %d, body = %s", buildStep.Code, buildStep.Body.String())
 	}
 
 	events := httptest.NewRecorder()
@@ -1507,6 +1544,17 @@ raise SystemExit("answer should not run")
 	}
 	if containsWorkflowStepNamed(workflow, "answer") {
 		t.Fatalf("answer should not start after cancellation: %#v", workflow["steps"])
+	}
+
+	buildStep := httptest.NewRecorder()
+	routes.ServeHTTP(buildStep, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id+"/steps/build_graph", nil))
+	if buildStep.Code != http.StatusOK || !strings.Contains(buildStep.Body.String(), `"status":"canceled"`) {
+		t.Fatalf("build step after cancel status = %d, body = %s", buildStep.Code, buildStep.Body.String())
+	}
+	answerStep := httptest.NewRecorder()
+	routes.ServeHTTP(answerStep, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id+"/steps/answer", nil))
+	if answerStep.Code != http.StatusNotFound || !strings.Contains(answerStep.Body.String(), "workflow_step_not_found") {
+		t.Fatalf("answer step after cancel status = %d, body = %s", answerStep.Code, answerStep.Body.String())
 	}
 
 	events := httptest.NewRecorder()
