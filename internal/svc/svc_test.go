@@ -1284,6 +1284,211 @@ with open(output, "w", encoding="utf-8") as f:
 	}
 }
 
+func TestBuildAndAnswerWorkflowBuildFailureStopsAnswer(t *testing.T) {
+	dir := t.TempDir()
+	buildScript := filepath.Join(dir, "build_worker.py")
+	answerScript := filepath.Join(dir, "answer_worker.py")
+	answerMarker := filepath.Join(dir, "answer-was-called")
+	mustWrite(t, filepath.Join(dir, "data", "demo", "demo_corpus.json"), "[]")
+	mustWrite(t, filepath.Join(dir, "schemas", "demo.json"), "{}")
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import sys
+print("build exploded", file=sys.stderr)
+raise SystemExit(4)
+`)
+	writeExecutable(t, answerScript, `#!/usr/bin/env python3
+import pathlib
+pathlib.Path("`+answerMarker+`").write_text("called", encoding="utf-8")
+`)
+
+	cfg := workflowTestConfig(dir, buildScript, answerScript)
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	workflow := createBuildAndAnswerWorkflow(t, routes, "demo", "Who?", "")
+	workflow = waitForWorkflow(t, routes, workflow["id"].(string), "failed")
+	if errorText, _ := workflow["error"].(string); !strings.Contains(errorText, "build_graph step failed") || !strings.Contains(errorText, "build exploded") {
+		t.Fatalf("workflow error = %#v", workflow["error"])
+	}
+	if !containsWorkflowStep(workflow, "build_graph", "build_graph", "failed") {
+		t.Fatalf("workflow steps = %#v", workflow["steps"])
+	}
+	if containsWorkflowStepNamed(workflow, "answer") {
+		t.Fatalf("answer step should not start after build failure: %#v", workflow["steps"])
+	}
+	if _, err := os.Stat(answerMarker); !os.IsNotExist(err) {
+		t.Fatalf("answer worker should not have been called; stat err = %v", err)
+	}
+
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("workflow events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"step_failed"`) ||
+		!strings.Contains(events.Body.String(), `"failed"`) ||
+		strings.Contains(events.Body.String(), "artifact_handoff") {
+		t.Fatalf("workflow events body = %s", events.Body.String())
+	}
+}
+
+func TestBuildAndAnswerWorkflowAnswerFailurePreservesBuildArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	buildScript := filepath.Join(dir, "build_worker.py")
+	answerScript := filepath.Join(dir, "answer_worker.py")
+	mustWrite(t, filepath.Join(dir, "data", "demo", "demo_corpus.json"), "[]")
+	mustWrite(t, filepath.Join(dir, "schemas", "demo.json"), "{}")
+	writeBuildWorker(t, buildScript)
+	writeExecutable(t, answerScript, `#!/usr/bin/env python3
+import sys
+print("answer exploded", file=sys.stderr)
+raise SystemExit(5)
+`)
+
+	cfg := workflowTestConfig(dir, buildScript, answerScript)
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	workflow := createBuildAndAnswerWorkflow(t, routes, "demo", "Who?", "")
+	workflow = waitForWorkflow(t, routes, workflow["id"].(string), "failed")
+	if errorText, _ := workflow["error"].(string); !strings.Contains(errorText, "answer step failed") || !strings.Contains(errorText, "answer exploded") {
+		t.Fatalf("workflow error = %#v", workflow["error"])
+	}
+	if !containsWorkflowStep(workflow, "build_graph", "build_graph", "succeeded") ||
+		!containsWorkflowStep(workflow, "answer", "answer", "failed") {
+		t.Fatalf("workflow steps = %#v", workflow["steps"])
+	}
+	for _, name := range []string{"graph", "chunks", "cache"} {
+		if !containsArtifactStatus(workflow, name, "written") {
+			t.Fatalf("workflow artifact %s not preserved as written: %#v", name, workflow["artifacts"])
+		}
+	}
+	if containsArtifactStatus(workflow, "answer", "written") {
+		t.Fatalf("answer artifact should not be written: %#v", workflow["artifacts"])
+	}
+
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("workflow events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"artifact_handoff"`) ||
+		!strings.Contains(events.Body.String(), `"step_failed"`) ||
+		!strings.Contains(events.Body.String(), "answer exploded") {
+		t.Fatalf("workflow events body = %s", events.Body.String())
+	}
+}
+
+func TestBuildAndAnswerWorkflowCancelPropagatesToChildJob(t *testing.T) {
+	dir := t.TempDir()
+	buildScript := filepath.Join(dir, "build_worker.py")
+	answerScript := filepath.Join(dir, "answer_worker.py")
+	mustWrite(t, filepath.Join(dir, "data", "demo", "demo_corpus.json"), "[]")
+	mustWrite(t, filepath.Join(dir, "schemas", "demo.json"), "{}")
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import time
+time.sleep(10)
+`)
+	writeExecutable(t, answerScript, `#!/usr/bin/env python3
+raise SystemExit("answer should not run")
+`)
+
+	cfg := workflowTestConfig(dir, buildScript, answerScript)
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	workflow := createBuildAndAnswerWorkflow(t, routes, "demo", "Who?", "")
+	id := workflow["id"].(string)
+	_ = waitForWorkflowStep(t, routes, id, "build_graph")
+
+	cancel := httptest.NewRecorder()
+	routes.ServeHTTP(cancel, httptest.NewRequest(http.MethodPost, "/v1/workflows/"+id+"/cancel", nil))
+	if cancel.Code != http.StatusOK {
+		t.Fatalf("cancel workflow status = %d, body = %s", cancel.Code, cancel.Body.String())
+	}
+	if !strings.Contains(cancel.Body.String(), `"canceled":true`) {
+		t.Fatalf("cancel workflow body = %s", cancel.Body.String())
+	}
+	workflow = waitForWorkflow(t, routes, id, "canceled")
+	if !containsWorkflowStep(workflow, "build_graph", "build_graph", "canceled") {
+		t.Fatalf("build step not canceled: %#v", workflow["steps"])
+	}
+	if containsWorkflowStepNamed(workflow, "answer") {
+		t.Fatalf("answer should not start after cancellation: %#v", workflow["steps"])
+	}
+
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("workflow events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"cancel_requested"`) ||
+		!strings.Contains(events.Body.String(), `"canceled"`) {
+		t.Fatalf("workflow events body = %s", events.Body.String())
+	}
+}
+
+func workflowTestConfig(dir string, buildScript string, answerScript string) config.Config {
+	return config.Config{
+		DefaultDataset:   "demo",
+		DefaultMode:      "noagent",
+		ArtifactRoot:     dir,
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		WorkflowRoot:     filepath.Join(dir, "workflows"),
+		PythonBin:        "python3",
+		BuildGraphScript: buildScript,
+		AnswerScript:     answerScript,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	}
+}
+
+func writeBuildWorker(t *testing.T, path string) {
+	t.Helper()
+	writeExecutable(t, path, `#!/usr/bin/env python3
+import json
+import os
+import sys
+graph = sys.argv[sys.argv.index("--graph-output") + 1]
+chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
+cache = sys.argv[sys.argv.index("--cache-dir") + 1]
+os.makedirs(os.path.dirname(graph), exist_ok=True)
+os.makedirs(os.path.dirname(chunks), exist_ok=True)
+os.makedirs(cache, exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    json.dump([], f)
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: c1\tChunk: hello\n")
+`)
+}
+
+func createBuildAndAnswerWorkflow(t *testing.T, routes http.Handler, dataset string, question string, answerOutputPath string) map[string]any {
+	t.Helper()
+	body := `{"type":"build_and_answer","build_and_answer":{"dataset":` + quote(dataset) + `,"question":` + quote(question)
+	if answerOutputPath != "" {
+		body += `,"answer_output_path":` + quote(answerOutputPath)
+	}
+	body += `}}`
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/workflows", bytes.NewBufferString(body)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create workflow status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var workflow map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &workflow); err != nil {
+		t.Fatalf("decode create workflow: %v", err)
+	}
+	if workflow["id"] == "" || workflow["schema_version"] != "workflow/v1" {
+		t.Fatalf("created workflow = %#v", workflow)
+	}
+	return workflow
+}
+
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }
@@ -1319,6 +1524,20 @@ func containsWorkflowStep(workflow map[string]any, name string, jobType string, 
 	return false
 }
 
+func containsWorkflowStepNamed(workflow map[string]any, name string) bool {
+	steps, ok := workflow["steps"].([]any)
+	if !ok {
+		return false
+	}
+	for _, step := range steps {
+		item, ok := step.(map[string]any)
+		if ok && item["name"] == name {
+			return true
+		}
+	}
+	return false
+}
+
 func waitForServiceJob(t *testing.T, routes http.Handler, id string, want string) map[string]any {
 	t.Helper()
 	for attempt := 0; attempt < 200; attempt++ {
@@ -1337,6 +1556,29 @@ func waitForServiceJob(t *testing.T, routes http.Handler, id string, want string
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("job %s did not reach %s", id, want)
+	return nil
+}
+
+func waitForWorkflowStep(t *testing.T, routes http.Handler, id string, stepName string) map[string]any {
+	t.Helper()
+	for attempt := 0; attempt < 200; attempt++ {
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("workflow status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var workflow map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &workflow); err != nil {
+			t.Fatalf("decode workflow: %v", err)
+		}
+		if containsWorkflowStepNamed(workflow, stepName) {
+			return workflow
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	workflow := httptest.NewRecorder()
+	routes.ServeHTTP(workflow, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id, nil))
+	t.Fatalf("workflow did not record step %s: %s", stepName, workflow.Body.String())
 	return nil
 }
 
