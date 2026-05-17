@@ -263,7 +263,9 @@ func TestParseDocumentsJobLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "parse_worker.py")
 	document := filepath.Join(dir, "incoming", "doc.txt")
+	documentTwo := filepath.Join(dir, "incoming", "doc2.md")
 	mustWrite(t, document, "hello from document")
+	mustWrite(t, documentTwo, "second document")
 	writeExecutable(t, script, `#!/usr/bin/env python3
 import json
 import os
@@ -291,7 +293,7 @@ print("parsed ok")
 	routes := service.Routes()
 
 	create := httptest.NewRecorder()
-	body := bytes.NewBufferString(`{"type":"parse_documents","parse_documents":{"dataset":"imported","document_paths":[` + quote(document) + `]}}`)
+	body := bytes.NewBufferString(`{"type":"parse_documents","parse_documents":{"dataset":"imported","document_paths":[` + quote(document) + `,` + quote(documentTwo) + `]}}`)
 	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
 	if create.Code != http.StatusAccepted {
 		t.Fatalf("create parse_documents status = %d, body = %s", create.Code, create.Body.String())
@@ -311,20 +313,98 @@ print("parsed ok")
 		t.Fatalf("parse_documents output missing: %v", err)
 	}
 	if !containsArtifactStatus(job, "corpus", "written") ||
+		!containsArtifactStatus(job, "document_1", "configured") ||
+		!containsArtifactStatus(job, "document_2", "configured") ||
 		!strings.Contains(fmt.Sprint(job["result"]), "parse-documents-result/v1") {
 		t.Fatalf("parse_documents job = %#v", job)
 	}
 	spec, ok := job["spec"].(map[string]any)
-	if !ok || spec["output_path"] != outputPath || spec["script_path"] != script {
+	if !ok || spec["output_path"] != outputPath || spec["script_path"] != script ||
+		!strings.Contains(toJSON(t, spec["document_paths"]), documentTwo) {
 		t.Fatalf("parse_documents spec = %#v", job["spec"])
 	}
 
 	restartedRoutes := svc.NewService(cfg).Routes()
 	loaded := httptest.NewRecorder()
 	restartedRoutes.ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID, nil))
-	if loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), `"type":"parse_documents"`) || !strings.Contains(loaded.Body.String(), `"status":"written"`) {
+	if loaded.Code != http.StatusOK ||
+		!strings.Contains(loaded.Body.String(), `"type":"parse_documents"`) ||
+		!strings.Contains(loaded.Body.String(), `"name":"document_2"`) ||
+		!strings.Contains(loaded.Body.String(), `"status":"written"`) {
 		t.Fatalf("loaded parse_documents job status = %d, body = %s", loaded.Code, loaded.Body.String())
 	}
+}
+
+func TestParseDocumentsJobFailureArtifacts(t *testing.T) {
+	t.Run("missing output marks corpus missing", func(t *testing.T) {
+		dir := t.TempDir()
+		document := filepath.Join(dir, "incoming", "doc.txt")
+		script := filepath.Join(dir, "missing_parse.py")
+		mustWrite(t, document, "hello")
+		writeExecutable(t, script, `#!/usr/bin/env python3
+print("no corpus written")
+`)
+		routes := svc.NewService(parseDocumentsTestConfig(dir, script)).Routes()
+
+		job := createParseDocumentsJob(t, routes, document)
+		job = waitForServiceJob(t, routes, job["id"].(string), "failed")
+		if !containsArtifactStatus(job, "document_1", "configured") ||
+			!containsArtifactStatus(job, "corpus", "missing") ||
+			!strings.Contains(toJSON(t, job["error"]), "parse documents output missing") {
+			t.Fatalf("missing output parse_documents job = %#v", job)
+		}
+	})
+
+	t.Run("bad output schema marks corpus failed", func(t *testing.T) {
+		dir := t.TempDir()
+		document := filepath.Join(dir, "incoming", "doc.txt")
+		script := filepath.Join(dir, "bad_parse.py")
+		mustWrite(t, document, "hello")
+		writeExecutable(t, script, `#!/usr/bin/env python3
+import os
+import sys
+output = sys.argv[sys.argv.index("--output") + 1]
+os.makedirs(os.path.dirname(output), exist_ok=True)
+open(output, "w", encoding="utf-8").write("not-json")
+`)
+		routes := svc.NewService(parseDocumentsTestConfig(dir, script)).Routes()
+
+		job := createParseDocumentsJob(t, routes, document)
+		job = waitForServiceJob(t, routes, job["id"].(string), "failed")
+		if !containsArtifactStatus(job, "corpus", "failed") ||
+			!strings.Contains(toJSON(t, job["error"]), "parse corpus output") {
+			t.Fatalf("bad output parse_documents job = %#v", job)
+		}
+	})
+
+	t.Run("worker failure preserves stderr and marks corpus failed", func(t *testing.T) {
+		dir := t.TempDir()
+		document := filepath.Join(dir, "incoming", "doc.txt")
+		script := filepath.Join(dir, "failed_parse.py")
+		mustWrite(t, document, "hello")
+		writeExecutable(t, script, `#!/usr/bin/env python3
+import sys
+print("parse exploded", file=sys.stderr)
+raise SystemExit(7)
+`)
+		routes := svc.NewService(parseDocumentsTestConfig(dir, script)).Routes()
+
+		job := createParseDocumentsJob(t, routes, document)
+		job = waitForServiceJob(t, routes, job["id"].(string), "failed")
+		if !containsArtifactStatus(job, "document_1", "configured") ||
+			!containsArtifactStatus(job, "corpus", "failed") ||
+			!strings.Contains(toJSON(t, job["error"]), "parse exploded") {
+			t.Fatalf("worker failure parse_documents job = %#v", job)
+		}
+		events := httptest.NewRecorder()
+		routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+job["id"].(string)+"/events", nil))
+		if events.Code != http.StatusOK ||
+			!strings.Contains(events.Body.String(), `"worker_started"`) ||
+			!strings.Contains(events.Body.String(), `"failed"`) ||
+			!strings.Contains(events.Body.String(), "parse exploded") {
+			t.Fatalf("parse_documents failure events status = %d, body = %s", events.Code, events.Body.String())
+		}
+	})
 }
 
 func TestReadyzReportsMissingRetrievalArtifacts(t *testing.T) {
@@ -1798,6 +1878,38 @@ func workflowTestConfig(dir string, buildScript string, answerScript string) con
 		WorkerCWD:        dir,
 		DatasetNames:     []string{"demo"},
 	}
+}
+
+func parseDocumentsTestConfig(dir string, script string) config.Config {
+	return config.Config{
+		DefaultDataset:  "demo",
+		ArtifactRoot:    dir,
+		CorpusRoot:      filepath.Join(dir, "data"),
+		SchemaRoot:      filepath.Join(dir, "schemas"),
+		JobRoot:         filepath.Join(dir, "jobs"),
+		PythonBin:       "python3",
+		ParseDocsScript: script,
+		WorkerCWD:       dir,
+		DatasetNames:    []string{"demo"},
+	}
+}
+
+func createParseDocumentsJob(t *testing.T, routes http.Handler, document string) map[string]any {
+	t.Helper()
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"parse_documents","parse_documents":{"dataset":"imported","document_paths":[` + quote(document) + `]}}`)
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create parse_documents status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var job map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &job); err != nil {
+		t.Fatalf("decode parse_documents job: %v", err)
+	}
+	if job["id"] == "" || job["type"] != "parse_documents" {
+		t.Fatalf("created parse_documents job = %#v", job)
+	}
+	return job
 }
 
 func writeBuildWorker(t *testing.T, path string) {
