@@ -120,3 +120,5 @@ Stable error codes:
 - No schema editor yet.
 - No automatic graph build. Import only prepares corpus/schema artifacts; graph
   construction remains a separate job/workflow step.
+- No dataset deletion in the import endpoint. Managed dataset cleanup is defined
+  separately in `docs/contracts/dataset_lifecycle.md`.
