@@ -30,6 +30,7 @@ type Config struct {
 	GoldenRoot       string
 	TraceRoot        string
 	JobRoot          string
+	WorkflowRoot     string
 	PythonBin        string
 	GoldenScript     string
 	BuildGraphScript string
@@ -63,6 +64,7 @@ func Load() Config {
 		GoldenRoot:       getenv("YOUTU_RAG_GOLDEN_ROOT", filepath.Join(artifactRoot, "output", "retrieval_golden")),
 		TraceRoot:        getenv("YOUTU_RAG_TRACE_ROOT", filepath.Join(artifactRoot, "output", "retrieval_traces")),
 		JobRoot:          getenv("YOUTU_RAG_JOB_ROOT", filepath.Join(artifactRoot, "output", "jobs")),
+		WorkflowRoot:     getenv("YOUTU_RAG_WORKFLOW_ROOT", filepath.Join(artifactRoot, "output", "workflows")),
 		PythonBin:        getenv("YOUTU_RAG_PYTHON", filepath.Join(artifactRoot, ".venv", "bin", "python")),
 		GoldenScript:     getenv("YOUTU_RAG_GOLDEN_SCRIPT", filepath.Join(artifactRoot, "scripts", "generate_retriever_golden.py")),
 		BuildGraphScript: getenv("YOUTU_RAG_BUILD_GRAPH_SCRIPT", filepath.Join(artifactRoot, "scripts", "build_graph_worker.py")),

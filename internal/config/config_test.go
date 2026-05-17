@@ -48,6 +48,9 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	if cfg.JobRoot != "/tmp/youtu-jobs" {
 		t.Fatalf("job root = %q", cfg.JobRoot)
 	}
+	if cfg.WorkflowRoot != filepath.Join("/tmp/youtu", "output", "workflows") {
+		t.Fatalf("workflow root = %q", cfg.WorkflowRoot)
+	}
 	if cfg.PythonBin != filepath.Join("/tmp/youtu", ".venv", "bin", "python") {
 		t.Fatalf("python bin = %q", cfg.PythonBin)
 	}

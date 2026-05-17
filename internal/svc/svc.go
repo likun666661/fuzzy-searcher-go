@@ -18,6 +18,7 @@ import (
 	"github.com/fuzzy-searcher-go/internal/workers/answer"
 	"github.com/fuzzy-searcher-go/internal/workers/buildgraph"
 	"github.com/fuzzy-searcher-go/internal/workers/golden"
+	"github.com/fuzzy-searcher-go/internal/workflows"
 )
 
 // Service owns HTTP routing and response mapping. Domain orchestration lives in
@@ -26,6 +27,7 @@ type Service struct {
 	config    config.Config
 	retriever *orchestrator.Retriever
 	jobs      *jobs.Manager
+	workflows *workflows.Manager
 }
 
 // NewService constructs the service layer.
@@ -34,6 +36,9 @@ func NewService(config config.Config) *Service {
 		config:    config,
 		retriever: orchestrator.NewRetriever(config),
 		jobs:      jobs.NewManager(jobs.WithFileStore(config.JobRoot)),
+		workflows: workflows.NewManager(
+			workflows.WithFileStore(config.WorkflowRoot),
+		),
 	}
 }
 
@@ -53,6 +58,10 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/jobs/{job_id}", s.handleJob)
 	mux.HandleFunc("GET /v1/jobs/{job_id}/events", s.handleJobEvents)
 	mux.HandleFunc("POST /v1/jobs/{job_id}/cancel", s.handleCancelJob)
+	mux.HandleFunc("POST /v1/workflows", s.handleCreateWorkflow)
+	mux.HandleFunc("GET /v1/workflows/{workflow_id}", s.handleWorkflow)
+	mux.HandleFunc("GET /v1/workflows/{workflow_id}/events", s.handleWorkflowEvents)
+	mux.HandleFunc("POST /v1/workflows/{workflow_id}/cancel", s.handleCancelWorkflow)
 	return mux
 }
 
@@ -185,6 +194,11 @@ type createJobRequest struct {
 	Answer         jobs.AnswerSpec            `json:"answer,omitempty"`
 }
 
+type createWorkflowRequest struct {
+	Type           string                       `json:"type"`
+	BuildAndAnswer workflows.BuildAndAnswerSpec `json:"build_and_answer,omitempty"`
+}
+
 func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	var input createJobRequest
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -206,76 +220,15 @@ func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, job)
 	case jobs.TypeGenerateGolden:
 		spec := s.generateGoldenSpec(input.GenerateGolden)
-		artifacts := generateGoldenArtifacts(spec)
-		job := s.jobs.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
-			recorder.Event("worker_started", "generate_golden Python worker started")
-			recorder.Artifact("golden_fixture", "running", "")
-			result, err := golden.Run(ctx, golden.Config{
-				PythonBin:  spec.PythonBin,
-				ScriptPath: spec.ScriptPath,
-				WorkingDir: spec.WorkingDir,
-			}, spec)
-			if err == nil {
-				recorder.Artifact("golden_fixture", "written", result.OutputPath)
-				recorder.Event("artifact_golden_written", "golden fixture artifact written")
-			} else if errors.Is(err, golden.ErrMissingOutput) {
-				recorder.Artifact("golden_fixture", "missing", "")
-			} else {
-				recorder.Artifact("golden_fixture", "failed", "")
-			}
-			return result, err
-		})
+		job := s.submitGenerateGoldenJob(spec)
 		writeJSON(w, http.StatusAccepted, job)
 	case jobs.TypeBuildGraph:
 		spec := s.buildGraphSpec(input.BuildGraph)
-		artifacts := buildGraphArtifacts(spec)
-		job := s.jobs.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
-			recorder.Event("worker_started", "build_graph Python worker started")
-			recorder.Artifact("graph", "running", "")
-			recorder.Artifact("chunks", "running", "")
-			result, err := buildgraph.Run(ctx, buildgraph.Config{
-				PythonBin:  spec.PythonBin,
-				ScriptPath: spec.ScriptPath,
-				WorkingDir: spec.WorkingDir,
-			}, spec)
-			if err == nil {
-				recorder.Artifact("graph", "written", result.GraphOutputPath)
-				recorder.Artifact("chunks", "written", result.ChunksOutputPath)
-				if result.CacheDir != "" {
-					recorder.Artifact("cache", "written", result.CacheDir)
-				}
-				recorder.Event("artifact_graph_written", "graph and chunks artifacts written")
-			} else if errors.Is(err, buildgraph.ErrMissingOutput) {
-				recorder.Artifact("graph", "missing", "")
-				recorder.Artifact("chunks", "missing", "")
-			} else {
-				recorder.Artifact("graph", "failed", "")
-				recorder.Artifact("chunks", "failed", "")
-			}
-			return result, err
-		})
+		job := s.submitBuildGraphJob(spec)
 		writeJSON(w, http.StatusAccepted, job)
 	case jobs.TypeAnswer:
 		spec := s.answerSpec(input.Answer)
-		artifacts := answerArtifacts(spec)
-		job := s.jobs.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
-			recorder.Event("worker_started", "answer Python worker started")
-			recorder.Artifact("answer", "running", "")
-			result, err := answer.Run(ctx, answer.Config{
-				PythonBin:  spec.PythonBin,
-				ScriptPath: spec.ScriptPath,
-				WorkingDir: spec.WorkingDir,
-			}, spec)
-			if err == nil {
-				recorder.Artifact("answer", "written", result.OutputPath)
-				recorder.Event("artifact_answer_written", "answer artifact written")
-			} else if errors.Is(err, answer.ErrMissingOutput) {
-				recorder.Artifact("answer", "missing", "")
-			} else {
-				recorder.Artifact("answer", "failed", "")
-			}
-			return result, err
-		})
+		job := s.submitAnswerJob(spec)
 		writeJSON(w, http.StatusAccepted, job)
 	case "":
 		writeError(w, http.StatusBadRequest, "invalid_job_type", fmt.Errorf("type is required"))
@@ -359,6 +312,28 @@ func (s *Service) generateGoldenSpec(input jobs.GenerateGoldenSpec) jobs.Generat
 	return spec
 }
 
+func (s *Service) submitGenerateGoldenJob(spec jobs.GenerateGoldenSpec) jobs.Job {
+	artifacts := generateGoldenArtifacts(spec)
+	return s.jobs.SubmitSpec(jobs.TypeGenerateGolden, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+		recorder.Event("worker_started", "generate_golden Python worker started")
+		recorder.Artifact("golden_fixture", "running", "")
+		result, err := golden.Run(ctx, golden.Config{
+			PythonBin:  spec.PythonBin,
+			ScriptPath: spec.ScriptPath,
+			WorkingDir: spec.WorkingDir,
+		}, spec)
+		if err == nil {
+			recorder.Artifact("golden_fixture", "written", result.OutputPath)
+			recorder.Event("artifact_golden_written", "golden fixture artifact written")
+		} else if errors.Is(err, golden.ErrMissingOutput) {
+			recorder.Artifact("golden_fixture", "missing", "")
+		} else {
+			recorder.Artifact("golden_fixture", "failed", "")
+		}
+		return result, err
+	})
+}
+
 func generateGoldenArtifacts(spec jobs.GenerateGoldenSpec) []jobs.Artifact {
 	return []jobs.Artifact{
 		{
@@ -411,6 +386,35 @@ func (s *Service) buildGraphSpec(input jobs.BuildGraphSpec) jobs.BuildGraphSpec 
 		spec.WorkingDir = s.config.WorkerCWD
 	}
 	return spec
+}
+
+func (s *Service) submitBuildGraphJob(spec jobs.BuildGraphSpec) jobs.Job {
+	artifacts := buildGraphArtifacts(spec)
+	return s.jobs.SubmitSpec(jobs.TypeBuildGraph, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+		recorder.Event("worker_started", "build_graph Python worker started")
+		recorder.Artifact("graph", "running", "")
+		recorder.Artifact("chunks", "running", "")
+		result, err := buildgraph.Run(ctx, buildgraph.Config{
+			PythonBin:  spec.PythonBin,
+			ScriptPath: spec.ScriptPath,
+			WorkingDir: spec.WorkingDir,
+		}, spec)
+		if err == nil {
+			recorder.Artifact("graph", "written", result.GraphOutputPath)
+			recorder.Artifact("chunks", "written", result.ChunksOutputPath)
+			if result.CacheDir != "" {
+				recorder.Artifact("cache", "written", result.CacheDir)
+			}
+			recorder.Event("artifact_graph_written", "graph and chunks artifacts written")
+		} else if errors.Is(err, buildgraph.ErrMissingOutput) {
+			recorder.Artifact("graph", "missing", "")
+			recorder.Artifact("chunks", "missing", "")
+		} else {
+			recorder.Artifact("graph", "failed", "")
+			recorder.Artifact("chunks", "failed", "")
+		}
+		return result, err
+	})
 }
 
 func buildGraphArtifacts(spec jobs.BuildGraphSpec) []jobs.Artifact {
@@ -503,6 +507,28 @@ func (s *Service) answerSpec(input jobs.AnswerSpec) jobs.AnswerSpec {
 	return spec
 }
 
+func (s *Service) submitAnswerJob(spec jobs.AnswerSpec) jobs.Job {
+	artifacts := answerArtifacts(spec)
+	return s.jobs.SubmitSpec(jobs.TypeAnswer, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+		recorder.Event("worker_started", "answer Python worker started")
+		recorder.Artifact("answer", "running", "")
+		result, err := answer.Run(ctx, answer.Config{
+			PythonBin:  spec.PythonBin,
+			ScriptPath: spec.ScriptPath,
+			WorkingDir: spec.WorkingDir,
+		}, spec)
+		if err == nil {
+			recorder.Artifact("answer", "written", result.OutputPath)
+			recorder.Event("artifact_answer_written", "answer artifact written")
+		} else if errors.Is(err, answer.ErrMissingOutput) {
+			recorder.Artifact("answer", "missing", "")
+		} else {
+			recorder.Artifact("answer", "failed", "")
+		}
+		return result, err
+	})
+}
+
 func answerArtifacts(spec jobs.AnswerSpec) []jobs.Artifact {
 	artifacts := []jobs.Artifact{}
 	if spec.GraphPath != "" {
@@ -538,6 +564,265 @@ func answerArtifacts(spec jobs.AnswerSpec) []jobs.Artifact {
 		Description:   "Final answer JSON written by the answer worker.",
 	})
 	return artifacts
+}
+
+func (s *Service) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
+	var input createWorkflowRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err)
+		return
+	}
+	switch input.Type {
+	case workflows.TypeBuildAndAnswer:
+		spec := s.buildAndAnswerSpec(input.BuildAndAnswer)
+		artifacts := buildAndAnswerArtifacts(spec)
+		workflow := s.workflows.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *workflows.Recorder) (any, error) {
+			return s.runBuildAndAnswerWorkflow(ctx, recorder, spec)
+		})
+		writeJSON(w, http.StatusAccepted, workflow)
+	case "":
+		writeError(w, http.StatusBadRequest, "invalid_workflow_type", fmt.Errorf("type is required"))
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_workflow_type", fmt.Errorf("unsupported workflow type %q", input.Type))
+	}
+}
+
+func (s *Service) buildAndAnswerSpec(input workflows.BuildAndAnswerSpec) workflows.BuildAndAnswerSpec {
+	spec := input
+	if spec.Dataset == "" {
+		spec.Dataset = s.config.DefaultDataset
+	}
+	if spec.Dataset == "" {
+		spec.Dataset = "demo"
+	}
+	artifactPaths := map[string]string{}
+	for _, artifact := range artifacts.NewRegistry(s.config).Artifacts(spec.Dataset) {
+		artifactPaths[artifact.Name] = artifact.Path
+	}
+	if spec.CorpusPath == "" {
+		spec.CorpusPath = artifactPaths["corpus"]
+	}
+	if spec.SchemaPath == "" {
+		spec.SchemaPath = artifactPaths["schema"]
+	}
+	if spec.GraphOutputPath == "" {
+		spec.GraphOutputPath = artifactPaths["graph"]
+	}
+	if spec.ChunksOutputPath == "" {
+		spec.ChunksOutputPath = artifactPaths["chunks"]
+	}
+	if spec.CacheDir == "" {
+		spec.CacheDir = artifactPaths["cache"]
+	}
+	if spec.AnswerOutputPath == "" {
+		spec.AnswerOutputPath = filepath.Join(s.config.ArtifactRoot, "output", "answers", spec.Dataset+".json")
+	}
+	if spec.AnswerMode == "" {
+		spec.AnswerMode = s.config.DefaultMode
+	}
+	if spec.TopK <= 0 {
+		spec.TopK = 20
+	}
+	return spec
+}
+
+func buildAndAnswerArtifacts(spec workflows.BuildAndAnswerSpec) []jobs.Artifact {
+	return []jobs.Artifact{
+		{
+			Name:        "corpus",
+			Role:        "input",
+			Kind:        "corpus_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.CorpusPath,
+			Status:      "configured",
+			Description: "Corpus JSON consumed by the build_graph step.",
+		},
+		{
+			Name:        "schema",
+			Role:        "input",
+			Kind:        "schema_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.SchemaPath,
+			Status:      "configured",
+			Description: "Schema JSON consumed by the build_graph step.",
+		},
+		{
+			Name:          "graph",
+			Role:          "output",
+			Kind:          "graph_json",
+			SchemaVersion: "youtu-graph/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.GraphOutputPath,
+			Status:        "pending",
+			Description:   "Graph artifact handed from build_graph to answer.",
+		},
+		{
+			Name:        "chunks",
+			Role:        "output",
+			Kind:        "chunks_txt",
+			Dataset:     spec.Dataset,
+			Path:        spec.ChunksOutputPath,
+			Status:      "pending",
+			Description: "Chunks artifact handed from build_graph to answer.",
+		},
+		{
+			Name:        "cache",
+			Role:        "output",
+			Kind:        "faiss_cache_dir",
+			Dataset:     spec.Dataset,
+			Path:        spec.CacheDir,
+			Status:      "pending",
+			Description: "Vector cache prepared by build_graph for later retrieval.",
+		},
+		{
+			Name:          "answer",
+			Role:          "output",
+			Kind:          "answer_json",
+			SchemaVersion: "answer-output/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.AnswerOutputPath,
+			Status:        "pending",
+			Description:   "Final answer JSON written by the answer step.",
+		},
+	}
+}
+
+func (s *Service) runBuildAndAnswerWorkflow(ctx context.Context, recorder *workflows.Recorder, spec workflows.BuildAndAnswerSpec) (any, error) {
+	buildSpec := s.buildGraphSpec(jobs.BuildGraphSpec{
+		Dataset:          spec.Dataset,
+		CorpusPath:       spec.CorpusPath,
+		SchemaPath:       spec.SchemaPath,
+		GraphOutputPath:  spec.GraphOutputPath,
+		ChunksOutputPath: spec.ChunksOutputPath,
+		CacheDir:         spec.CacheDir,
+		ConfigPath:       spec.ConfigPath,
+		Mode:             spec.BuildMode,
+	})
+	buildJob := s.submitBuildGraphJob(buildSpec)
+	recorder.StepStarted("build_graph", buildJob)
+	buildJob, err := s.waitForJob(ctx, buildJob.ID)
+	recorder.StepFinished("build_graph", buildJob)
+	if err != nil {
+		return nil, err
+	}
+	if buildJob.Status != jobs.StatusSucceeded {
+		return map[string]any{
+			"schema_version":     "build-and-answer-result/v1",
+			"build_graph_job_id": buildJob.ID,
+		}, fmt.Errorf("build_graph step failed: %s", buildJob.Error)
+	}
+	recorder.Artifact("graph", "written", buildSpec.GraphOutputPath)
+	recorder.Artifact("chunks", "written", buildSpec.ChunksOutputPath)
+	if buildSpec.CacheDir != "" {
+		recorder.Artifact("cache", "written", buildSpec.CacheDir)
+	}
+	recorder.Event("artifact_handoff", "build_graph graph/chunks artifacts handed to answer")
+
+	answerSpec := s.answerSpec(jobs.AnswerSpec{
+		Dataset:    spec.Dataset,
+		Question:   spec.Question,
+		OutputPath: spec.AnswerOutputPath,
+		Mode:       spec.AnswerMode,
+		TopK:       spec.TopK,
+		GraphPath:  buildSpec.GraphOutputPath,
+		ChunksPath: buildSpec.ChunksOutputPath,
+		ConfigPath: spec.ConfigPath,
+	})
+	answerJob := s.submitAnswerJob(answerSpec)
+	recorder.StepStarted("answer", answerJob)
+	answerJob, err = s.waitForJob(ctx, answerJob.ID)
+	recorder.StepFinished("answer", answerJob)
+	if err != nil {
+		return nil, err
+	}
+	if answerJob.Status != jobs.StatusSucceeded {
+		return map[string]any{
+			"schema_version":     "build-and-answer-result/v1",
+			"build_graph_job_id": buildJob.ID,
+			"answer_job_id":      answerJob.ID,
+		}, fmt.Errorf("answer step failed: %s", answerJob.Error)
+	}
+	recorder.Artifact("answer", "written", answerSpec.OutputPath)
+
+	return map[string]any{
+		"schema_version":     "build-and-answer-result/v1",
+		"dataset":            spec.Dataset,
+		"question":           spec.Question,
+		"build_graph_job_id": buildJob.ID,
+		"answer_job_id":      answerJob.ID,
+		"graph_output_path":  buildSpec.GraphOutputPath,
+		"chunks_output_path": buildSpec.ChunksOutputPath,
+		"cache_dir":          buildSpec.CacheDir,
+		"answer_output_path": answerSpec.OutputPath,
+	}, nil
+}
+
+func (s *Service) waitForJob(ctx context.Context, id string) (jobs.Job, error) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		job, err := s.jobs.Get(id)
+		if err != nil {
+			return jobs.Job{}, err
+		}
+		if isJobTerminal(job.Status) {
+			return job, nil
+		}
+		select {
+		case <-ctx.Done():
+			_, _, _ = s.jobs.Cancel(id)
+			for attempt := 0; attempt < 200; attempt++ {
+				job, err := s.jobs.Get(id)
+				if err != nil {
+					return jobs.Job{}, err
+				}
+				if isJobTerminal(job.Status) {
+					return job, ctx.Err()
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			job, _ := s.jobs.Get(id)
+			return job, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func isJobTerminal(status jobs.Status) bool {
+	return status == jobs.StatusSucceeded || status == jobs.StatusFailed || status == jobs.StatusCanceled
+}
+
+func (s *Service) handleWorkflow(w http.ResponseWriter, r *http.Request) {
+	workflow, err := s.workflows.Get(r.PathValue("workflow_id"))
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, workflow)
+}
+
+func (s *Service) handleWorkflowEvents(w http.ResponseWriter, r *http.Request) {
+	events, err := s.workflows.Events(r.PathValue("workflow_id"))
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"workflow_id": r.PathValue("workflow_id"),
+		"events":      events,
+	})
+}
+
+func (s *Service) handleCancelWorkflow(w http.ResponseWriter, r *http.Request) {
+	workflow, canceled, err := s.workflows.Cancel(r.PathValue("workflow_id"))
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"canceled": canceled,
+		"workflow": workflow,
+	})
 }
 
 func (s *Service) handleJob(w http.ResponseWriter, r *http.Request) {
@@ -594,4 +879,12 @@ func writeJobError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, "job_failed", err)
+}
+
+func writeWorkflowError(w http.ResponseWriter, err error) {
+	if errors.Is(err, workflows.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "workflow_not_found", err)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "workflow_failed", err)
 }

@@ -1151,6 +1151,139 @@ with open(output, "w", encoding="utf-8") as f:
 	}
 }
 
+func TestBuildAndAnswerWorkflowLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	buildScript := filepath.Join(dir, "build_worker.py")
+	answerScript := filepath.Join(dir, "answer_worker.py")
+	corpusPath := filepath.Join(dir, "data", "demo", "demo_corpus.json")
+	schemaPath := filepath.Join(dir, "schemas", "demo.json")
+	graphPath := filepath.Join(dir, "output", "graphs", "demo_new.json")
+	chunksPath := filepath.Join(dir, "output", "chunks", "demo.txt")
+	cacheDir := filepath.Join(dir, "retriever", "faiss_cache_new", "demo")
+	answerPath := filepath.Join(dir, "output", "answers", "demo.json")
+	mustWrite(t, corpusPath, "[]")
+	mustWrite(t, schemaPath, "{}")
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import json
+import os
+import sys
+graph = sys.argv[sys.argv.index("--graph-output") + 1]
+chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
+cache = sys.argv[sys.argv.index("--cache-dir") + 1]
+os.makedirs(os.path.dirname(graph), exist_ok=True)
+os.makedirs(os.path.dirname(chunks), exist_ok=True)
+os.makedirs(cache, exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    json.dump([], f)
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: c1\tChunk: hello\n")
+`)
+	writeExecutable(t, answerScript, `#!/usr/bin/env python3
+import json
+import os
+import sys
+graph = sys.argv[sys.argv.index("--graph") + 1]
+chunks = sys.argv[sys.argv.index("--chunks") + 1]
+output = sys.argv[sys.argv.index("--output") + 1]
+question = sys.argv[sys.argv.index("--question") + 1]
+if not os.path.exists(graph) or not os.path.exists(chunks):
+    raise SystemExit("missing handoff artifacts")
+os.makedirs(os.path.dirname(output), exist_ok=True)
+with open(output, "w", encoding="utf-8") as f:
+    json.dump({"schema_version": "answer-output/v1", "question": question, "answer": "ok"}, f)
+`)
+
+	cfg := config.Config{
+		DefaultDataset:   "demo",
+		DefaultMode:      "noagent",
+		ArtifactRoot:     dir,
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		WorkflowRoot:     filepath.Join(dir, "workflows"),
+		PythonBin:        "python3",
+		BuildGraphScript: buildScript,
+		AnswerScript:     answerScript,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"build_and_answer","build_and_answer":{"dataset":"demo","question":"Who?","answer_output_path":` + quote(answerPath) + `}}`)
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/workflows", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create workflow status = %d, body = %s", create.Code, create.Body.String())
+	}
+	for _, want := range []string{
+		`"schema_version":"workflow/v1"`,
+		`"type":"build_and_answer"`,
+		`"name":"graph"`,
+		`"name":"chunks"`,
+		`"name":"answer"`,
+		`"status":"pending"`,
+	} {
+		if !strings.Contains(create.Body.String(), want) {
+			t.Fatalf("create workflow missing %s: %s", want, create.Body.String())
+		}
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create workflow: %v", err)
+	}
+	workflow := waitForWorkflow(t, routes, created.ID, "succeeded")
+	steps, ok := workflow["steps"].([]any)
+	if !ok || len(steps) != 2 {
+		t.Fatalf("workflow steps = %#v", workflow["steps"])
+	}
+	if !containsWorkflowStep(workflow, "build_graph", "build_graph", "succeeded") ||
+		!containsWorkflowStep(workflow, "answer", "answer", "succeeded") {
+		t.Fatalf("workflow steps = %#v", workflow["steps"])
+	}
+	for _, name := range []string{"graph", "chunks", "cache", "answer"} {
+		if !containsArtifactStatus(workflow, name, "written") {
+			t.Fatalf("workflow artifact %s not written: %#v", name, workflow["artifacts"])
+		}
+	}
+	for _, path := range []string{graphPath, chunksPath, cacheDir, answerPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("workflow artifact missing %s: %v", path, err)
+		}
+	}
+	result, ok := workflow["result"].(map[string]any)
+	if !ok || result["schema_version"] != "build-and-answer-result/v1" || result["answer_output_path"] != answerPath {
+		t.Fatalf("workflow result = %#v", workflow["result"])
+	}
+
+	restarted := svc.NewService(cfg)
+	restartedRoutes := restarted.Routes()
+	loaded := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+created.ID, nil))
+	if loaded.Code != http.StatusOK {
+		t.Fatalf("loaded workflow status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+	if !strings.Contains(loaded.Body.String(), `"status":"succeeded"`) ||
+		!strings.Contains(loaded.Body.String(), `"status":"written"`) {
+		t.Fatalf("loaded workflow body = %s", loaded.Body.String())
+	}
+	events := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("loaded workflow events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"step_started"`) ||
+		!strings.Contains(events.Body.String(), `"artifact_handoff"`) ||
+		!strings.Contains(events.Body.String(), `"succeeded"`) {
+		t.Fatalf("loaded workflow events body = %s", events.Body.String())
+	}
+}
+
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }
@@ -1163,6 +1296,23 @@ func containsArtifactStatus(job map[string]any, name string, status string) bool
 	for _, artifact := range artifacts {
 		item, ok := artifact.(map[string]any)
 		if ok && item["name"] == name && item["status"] == status {
+			return true
+		}
+	}
+	return false
+}
+
+func containsWorkflowStep(workflow map[string]any, name string, jobType string, status string) bool {
+	steps, ok := workflow["steps"].([]any)
+	if !ok {
+		return false
+	}
+	for _, step := range steps {
+		item, ok := step.(map[string]any)
+		if ok && item["name"] == name && item["type"] == jobType && item["status"] == status {
+			if item["job_id"] == "" {
+				return false
+			}
 			return true
 		}
 	}
@@ -1187,6 +1337,29 @@ func waitForServiceJob(t *testing.T, routes http.Handler, id string, want string
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("job %s did not reach %s", id, want)
+	return nil
+}
+
+func waitForWorkflow(t *testing.T, routes http.Handler, id string, want string) map[string]any {
+	t.Helper()
+	for attempt := 0; attempt < 400; attempt++ {
+		rec := httptest.NewRecorder()
+		routes.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("workflow status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+		var workflow map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &workflow); err != nil {
+			t.Fatalf("decode workflow: %v", err)
+		}
+		if workflow["status"] == want {
+			return workflow
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	workflow := httptest.NewRecorder()
+	routes.ServeHTTP(workflow, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id, nil))
+	t.Fatalf("workflow did not reach %s: %s", want, workflow.Body.String())
 	return nil
 }
 

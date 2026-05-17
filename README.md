@@ -70,6 +70,10 @@ It currently exposes the first service milestone:
 - `GET /v1/jobs/{job_id}`
 - `GET /v1/jobs/{job_id}/events`
 - `POST /v1/jobs/{job_id}/cancel`
+- `POST /v1/workflows`
+- `GET /v1/workflows/{workflow_id}`
+- `GET /v1/workflows/{workflow_id}/events`
+- `POST /v1/workflows/{workflow_id}/cancel`
 
 Run it with explicit demo artifacts:
 
@@ -119,6 +123,32 @@ Then inspect the job and its event stream:
 curl -s http://127.0.0.1:8080/v1/jobs/<job_id>
 curl -s http://127.0.0.1:8080/v1/jobs/<job_id>/events
 curl -s -X POST http://127.0.0.1:8080/v1/jobs/<job_id>/cancel
+```
+
+For product-level orchestration, submit a workflow. The first workflow chains a
+`build_graph` child job into an `answer` child job and records artifact handoff
+from graph/chunks outputs into answer inputs:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/workflows \
+  -H 'content-type: application/json' \
+  -d '{
+    "type": "build_and_answer",
+    "build_and_answer": {
+      "dataset": "demo",
+      "question": "Who signed with Barcelona?",
+      "answer_mode": "noagent",
+      "top_k": 20
+    }
+  }'
+```
+
+Then inspect the workflow and its event stream:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/workflows/<workflow_id>
+curl -s http://127.0.0.1:8080/v1/workflows/<workflow_id>/events
+curl -s -X POST http://127.0.0.1:8080/v1/workflows/<workflow_id>/cancel
 ```
 
 The same job envelope also supports Python-backed long-running workers for
