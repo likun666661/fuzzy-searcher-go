@@ -19,6 +19,13 @@ var ErrNotFound = errors.New("job not found")
 type Status string
 
 const (
+	TypeRetrieve       = "retrieve"
+	TypeBuildGraph     = "build_graph"
+	TypeGenerateGolden = "generate_golden"
+	TypeAnswer         = "answer"
+)
+
+const (
 	StatusQueued    Status = "queued"
 	StatusRunning   Status = "running"
 	StatusSucceeded Status = "succeeded"
@@ -36,14 +43,41 @@ type Event struct {
 
 // Job is a snapshot of async job state.
 type Job struct {
-	ID         string     `json:"id"`
-	Type       string     `json:"type"`
-	Status     Status     `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	Result     any        `json:"result,omitempty"`
+	SchemaVersion string     `json:"schema_version"`
+	ID            string     `json:"id"`
+	Type          string     `json:"type"`
+	Status        Status     `json:"status"`
+	Spec          any        `json:"spec,omitempty"`
+	Artifacts     []Artifact `json:"artifacts,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	StartedAt     *time.Time `json:"started_at,omitempty"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	Result        any        `json:"result,omitempty"`
+}
+
+// Artifact describes an input or output file/object associated with a job.
+type Artifact struct {
+	Name          string `json:"name"`
+	Role          string `json:"role"`
+	Kind          string `json:"kind"`
+	SchemaVersion string `json:"schema_version,omitempty"`
+	Dataset       string `json:"dataset,omitempty"`
+	Path          string `json:"path,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Description   string `json:"description,omitempty"`
+}
+
+// RetrieveSpec is the typed job spec for the current retrieve workflow.
+type RetrieveSpec struct {
+	Dataset        string  `json:"dataset,omitempty"`
+	Question       string  `json:"question"`
+	TopK           int     `json:"top_k,omitempty"`
+	Mode           string  `json:"mode,omitempty"`
+	GraphPath      string  `json:"graph_path,omitempty"`
+	ChunksPath     string  `json:"chunks_path,omitempty"`
+	SidecarURL     string  `json:"sidecar_url,omitempty"`
+	Path2Threshold float64 `json:"path2_threshold,omitempty"`
 }
 
 // Runner is the unit of work executed by the manager.
@@ -96,15 +130,24 @@ func WithFileStore(dir string) Option {
 // Submit registers and starts one job. Jobs use a background context so they
 // outlive the HTTP request that created them; callers can cancel via Cancel.
 func (m *Manager) Submit(jobType string, runner Runner) Job {
+	return m.SubmitSpec(jobType, nil, nil, runner)
+}
+
+// SubmitSpec registers and starts one typed job with stable spec/artifact
+// metadata.
+func (m *Manager) SubmitSpec(jobType string, spec any, artifacts []Artifact, runner Runner) Job {
 	id := m.nextID()
 	now := time.Now().UTC()
 	ctx, cancel := context.WithCancel(context.Background())
 	ent := &entry{
 		job: Job{
-			ID:        id,
-			Type:      jobType,
-			Status:    StatusQueued,
-			CreatedAt: now,
+			SchemaVersion: "service-job/v1",
+			ID:            id,
+			Type:          jobType,
+			Status:        StatusQueued,
+			Spec:          spec,
+			Artifacts:     append([]Artifact(nil), artifacts...),
+			CreatedAt:     now,
 		},
 		events: []Event{{
 			Time:    now,
@@ -269,6 +312,9 @@ func (m *Manager) loadStoredJobs() {
 			continue
 		}
 		job := record.Job
+		if job.SchemaVersion == "" {
+			job.SchemaVersion = "service-job/v1"
+		}
 		events := append([]Event(nil), record.Events...)
 		if !isTerminal(job.Status) {
 			job.Status = StatusFailed
@@ -297,8 +343,9 @@ func (m *Manager) persistLocked(ent *entry) {
 	events := make([]Event, len(ent.events))
 	copy(events, ent.events)
 	_ = m.store.Save(record{
-		Job:    cloneJob(ent.job),
-		Events: events,
+		SchemaVersion: "job-record/v1",
+		Job:           cloneJob(ent.job),
+		Events:        events,
 	})
 }
 
@@ -314,6 +361,7 @@ func isTerminal(status Status) bool {
 func cloneJob(job Job) Job {
 	job.StartedAt = cloneTime(job.StartedAt)
 	job.FinishedAt = cloneTime(job.FinishedAt)
+	job.Artifacts = append([]Artifact(nil), job.Artifacts...)
 	return job
 }
 
@@ -330,8 +378,9 @@ func timePtr(value time.Time) *time.Time {
 }
 
 type record struct {
-	Job    Job     `json:"job"`
-	Events []Event `json:"events"`
+	SchemaVersion string  `json:"schema_version"`
+	Job           Job     `json:"job"`
+	Events        []Event `json:"events"`
 }
 
 type store interface {

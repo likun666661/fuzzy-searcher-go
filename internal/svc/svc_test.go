@@ -351,6 +351,14 @@ func TestRetrieveJobLifecycle(t *testing.T) {
 	if created.ID == "" {
 		t.Fatalf("create job missing id: %s", create.Body.String())
 	}
+	if !strings.Contains(create.Body.String(), `"schema_version":"service-job/v1"`) ||
+		!strings.Contains(create.Body.String(), `"spec"`) ||
+		!strings.Contains(create.Body.String(), `"artifacts"`) ||
+		!strings.Contains(create.Body.String(), `"name":"graph"`) ||
+		!strings.Contains(create.Body.String(), `"name":"chunks"`) ||
+		!strings.Contains(create.Body.String(), `"schema_version":"retrieve-result/v1"`) {
+		t.Fatalf("create job missing typed spec/artifact contract: %s", create.Body.String())
+	}
 
 	job := waitForServiceJob(t, routes, created.ID, "succeeded")
 	result, ok := job["result"].(map[string]any)

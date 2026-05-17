@@ -185,10 +185,16 @@ func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch input.Type {
-	case "retrieve":
-		job := s.jobs.Submit(input.Type, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+	case jobs.TypeRetrieve:
+		spec := retrieveJobSpec(input.Retrieve)
+		artifacts := retrieveJobArtifacts(input.Retrieve)
+		job := s.jobs.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
 			recorder.Event("retrieve_started", "retrieve request started")
-			return s.retriever.Retrieve(ctx, input.Retrieve)
+			result, err := s.retriever.Retrieve(ctx, input.Retrieve)
+			if err == nil {
+				recorder.Event("artifact_result_inline", "retrieve result stored in job result")
+			}
+			return result, err
 		})
 		writeJSON(w, http.StatusAccepted, job)
 	case "":
@@ -196,6 +202,55 @@ func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_job_type", fmt.Errorf("unsupported job type %q", input.Type))
 	}
+}
+
+func retrieveJobSpec(input orchestrator.RetrieveInput) jobs.RetrieveSpec {
+	return jobs.RetrieveSpec{
+		Dataset:        input.Dataset,
+		Question:       input.Question,
+		TopK:           input.TopK,
+		Mode:           input.Mode,
+		GraphPath:      input.GraphPath,
+		ChunksPath:     input.ChunksPath,
+		SidecarURL:     input.SidecarURL,
+		Path2Threshold: input.Path2Threshold,
+	}
+}
+
+func retrieveJobArtifacts(input orchestrator.RetrieveInput) []jobs.Artifact {
+	artifacts := []jobs.Artifact{}
+	if input.GraphPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "graph",
+			Role:        "input",
+			Kind:        "graph_json",
+			Dataset:     input.Dataset,
+			Path:        input.GraphPath,
+			Status:      "configured",
+			Description: "Graph JSON used by the retrieve job.",
+		})
+	}
+	if input.ChunksPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "chunks",
+			Role:        "input",
+			Kind:        "chunks_txt",
+			Dataset:     input.Dataset,
+			Path:        input.ChunksPath,
+			Status:      "configured",
+			Description: "Chunk text file used by the retrieve job.",
+		})
+	}
+	artifacts = append(artifacts, jobs.Artifact{
+		Name:          "retrieve_result",
+		Role:          "output",
+		Kind:          "retrieve_result_json",
+		SchemaVersion: "retrieve-result/v1",
+		Dataset:       input.Dataset,
+		Status:        "inline",
+		Description:   "RetrieveResult is returned inline in the job result field.",
+	})
+	return artifacts
 }
 
 func (s *Service) handleJob(w http.ResponseWriter, r *http.Request) {

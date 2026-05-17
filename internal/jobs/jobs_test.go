@@ -70,7 +70,15 @@ func TestManagerCancel(t *testing.T) {
 func TestManagerFileStoreReloadsCompletedJobs(t *testing.T) {
 	dir := t.TempDir()
 	manager := jobs.NewManager(jobs.WithFileStore(dir))
-	job := manager.Submit("test", func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+	spec := jobs.RetrieveSpec{Dataset: "demo", Question: "hello", TopK: 3, Mode: "native"}
+	artifacts := []jobs.Artifact{{
+		Name:          "retrieve_result",
+		Role:          "output",
+		Kind:          "retrieve_result_json",
+		SchemaVersion: "retrieve-result/v1",
+		Status:        "inline",
+	}}
+	job := manager.SubmitSpec(jobs.TypeRetrieve, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
 		recorder.Event("step", "persist me")
 		return map[string]string{"answer": "ok"}, nil
 	})
@@ -81,8 +89,11 @@ func TestManagerFileStoreReloadsCompletedJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load job: %v", err)
 	}
-	if loaded.Status != jobs.StatusSucceeded || loaded.Result == nil {
+	if loaded.SchemaVersion != "service-job/v1" || loaded.Type != jobs.TypeRetrieve || loaded.Status != jobs.StatusSucceeded || loaded.Result == nil {
 		t.Fatalf("loaded job = %#v", loaded)
+	}
+	if len(loaded.Artifacts) != 1 || loaded.Artifacts[0].SchemaVersion != "retrieve-result/v1" {
+		t.Fatalf("loaded artifacts = %#v", loaded.Artifacts)
 	}
 	events, err := reloaded.Events(job.ID)
 	if err != nil {
