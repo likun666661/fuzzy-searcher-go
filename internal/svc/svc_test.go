@@ -542,6 +542,20 @@ print(json.dumps({"ok": True, "output": output}))
 			t.Fatalf("create job missing %s: %s", want, create.Body.String())
 		}
 	}
+	var createdJob map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &createdJob); err != nil {
+		t.Fatalf("decode created generate_golden job: %v", err)
+	}
+	spec, ok := createdJob["spec"].(map[string]any)
+	if !ok ||
+		spec["dataset"] != "demo" ||
+		spec["output_path"] != outputPath ||
+		spec["limit"] != float64(2) ||
+		spec["python_bin"] != "python3" ||
+		spec["script_path"] != scriptPath ||
+		spec["working_dir"] != dir {
+		t.Fatalf("created generate_golden spec = %#v", createdJob["spec"])
+	}
 
 	var created struct {
 		ID string `json:"id"`
@@ -571,6 +585,16 @@ print(json.dumps({"ok": True, "output": output}))
 	if !strings.Contains(loaded.Body.String(), `"status":"succeeded"`) ||
 		!strings.Contains(loaded.Body.String(), `"status":"written"`) {
 		t.Fatalf("loaded job body = %s", loaded.Body.String())
+	}
+	events := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("loaded events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"worker_started"`) ||
+		!strings.Contains(events.Body.String(), `"artifact_golden_written"`) ||
+		!strings.Contains(events.Body.String(), `"succeeded"`) {
+		t.Fatalf("loaded events body = %s", events.Body.String())
 	}
 }
 
@@ -619,6 +643,43 @@ raise SystemExit(5)
 	if !strings.Contains(events.Body.String(), `"worker_started"`) ||
 		!strings.Contains(events.Body.String(), `"failed"`) {
 		t.Fatalf("events body = %s", events.Body.String())
+	}
+}
+
+func TestGenerateGoldenJobMissingOutputMarksArtifactMissing(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+print("ok but did not write output")
+`)
+
+	service := svc.NewService(config.Config{
+		DefaultDataset: "demo",
+		GoldenRoot:     filepath.Join(dir, "golden"),
+		JobRoot:        filepath.Join(dir, "jobs"),
+		PythonBin:      "python3",
+		GoldenScript:   scriptPath,
+		WorkerCWD:      dir,
+	})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"generate_golden","generate_golden":{"dataset":"demo"}}`)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "failed")
+	if errorText, _ := job["error"].(string); !strings.Contains(errorText, "golden output missing") {
+		t.Fatalf("job error = %#v", job["error"])
+	}
+	if !containsArtifactStatus(job, "golden_fixture", "missing") {
+		t.Fatalf("job artifacts not missing: %#v", job["artifacts"])
 	}
 }
 

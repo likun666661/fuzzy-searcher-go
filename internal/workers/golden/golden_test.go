@@ -90,6 +90,30 @@ print("ok but no file")
 	}
 }
 
+func TestRunRejectsUnexpectedGoldenSchema(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "worker.py")
+	output := filepath.Join(dir, "golden.json")
+	writeExecutable(t, script, `#!/usr/bin/env python3
+import json
+import sys
+out = sys.argv[sys.argv.index("--output") + 1]
+with open(out, "w", encoding="utf-8") as f:
+    json.dump({"schema_version": "not-golden/v1"}, f)
+`)
+
+	_, err := golden.Run(context.Background(), golden.Config{
+		PythonBin:  "python3",
+		ScriptPath: script,
+	}, jobs.GenerateGoldenSpec{
+		Dataset:    "demo",
+		OutputPath: output,
+	})
+	if err == nil || !strings.Contains(err.Error(), `unexpected golden schema_version "not-golden/v1"`) {
+		t.Fatalf("schema err = %v", err)
+	}
+}
+
 func writeExecutable(t *testing.T, path string, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
