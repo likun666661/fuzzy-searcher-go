@@ -402,6 +402,122 @@ func TestDatasetDeleteEndpoint(t *testing.T) {
 	}
 }
 
+func TestDatasetRebuildEndpoint(t *testing.T) {
+	root := t.TempDir()
+	sourceCorpus := filepath.Join(root, "incoming", "corpus.json")
+	sourceSchema := filepath.Join(root, "incoming", "schema.json")
+	buildScript := filepath.Join(root, "workers", "build_graph.py")
+	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
+	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	mustMkdir(t, filepath.Dir(buildScript))
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import json
+import os
+import sys
+
+def value(flag):
+    return sys.argv[sys.argv.index(flag) + 1]
+
+dataset = value("--dataset")
+corpus = value("--corpus")
+schema = value("--schema")
+graph = value("--graph-output")
+chunks = value("--chunks-output")
+cache = value("--cache-dir")
+if dataset != "imported":
+    raise SystemExit("unexpected dataset: " + dataset)
+if not corpus.endswith("data/uploaded/imported/corpus.json"):
+    raise SystemExit("unexpected corpus: " + corpus)
+if not schema.endswith("schemas/imported.json"):
+    raise SystemExit("unexpected schema: " + schema)
+if os.path.exists(graph):
+    raise SystemExit("graph output was not cleaned before rebuild")
+os.makedirs(os.path.dirname(graph), exist_ok=True)
+os.makedirs(os.path.dirname(chunks), exist_ok=True)
+os.makedirs(cache, exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    json.dump([{"rebuilt": True}], f)
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: rebuilt\tChunk: hello\n")
+`)
+	cfg := config.Config{
+		ArtifactRoot:     root,
+		DefaultDataset:   "demo",
+		CorpusRoot:       filepath.Join(root, "data"),
+		SchemaRoot:       filepath.Join(root, "schemas"),
+		GraphRoot:        filepath.Join(root, "output", "graphs"),
+		ChunksRoot:       filepath.Join(root, "output", "chunks"),
+		CacheRoot:        filepath.Join(root, "retriever", "faiss_cache_new"),
+		GoldenRoot:       filepath.Join(root, "output", "retrieval_golden"),
+		TraceRoot:        filepath.Join(root, "output", "retrieval_traces"),
+		DatasetMetaRoot:  filepath.Join(root, "output", "datasets"),
+		JobRoot:          filepath.Join(root, "jobs"),
+		PythonBin:        "python3",
+		BuildGraphScript: buildScript,
+		WorkerCWD:        root,
+		DatasetNames:     []string{"demo"},
+	}
+	routes := svc.NewService(cfg).Routes()
+	imported := httptest.NewRecorder()
+	routes.ServeHTTP(imported, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"imported","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
+	if imported.Code != http.StatusCreated {
+		t.Fatalf("import status = %d, body = %s", imported.Code, imported.Body.String())
+	}
+	staleGraph := filepath.Join(root, "output", "graphs", "imported_new.json")
+	staleChunks := filepath.Join(root, "output", "chunks", "imported.txt")
+	staleCache := filepath.Join(root, "retriever", "faiss_cache_new", "imported", "index.faiss")
+	mustWrite(t, staleGraph, "stale")
+	mustWrite(t, staleChunks, "stale")
+	mustWrite(t, staleCache, "stale")
+	mustWrite(t, filepath.Join(root, "output", "retrieval_golden", "imported.json"), `{"schema_version":"retriever-golden/v1"}`)
+
+	dryRun := httptest.NewRecorder()
+	routes.ServeHTTP(dryRun, httptest.NewRequest(http.MethodPost, "/v1/datasets/imported/rebuild", bytes.NewBufferString(`{"dry_run":true}`)))
+	if dryRun.Code != http.StatusOK ||
+		!strings.Contains(dryRun.Body.String(), `"schema_version":"dataset-rebuild/v1"`) ||
+		!strings.Contains(dryRun.Body.String(), `"status":"planned"`) ||
+		!strings.Contains(dryRun.Body.String(), `"status":"skipped"`) {
+		t.Fatalf("dry-run rebuild status = %d, body = %s", dryRun.Code, dryRun.Body.String())
+	}
+	if _, err := os.Stat(staleGraph); err != nil {
+		t.Fatalf("dry-run should not remove graph: %v", err)
+	}
+
+	conflict := httptest.NewRecorder()
+	routes.ServeHTTP(conflict, httptest.NewRequest(http.MethodPost, "/v1/datasets/imported/rebuild", bytes.NewBufferString(`{"overwrite_outputs":false}`)))
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), `"status":"conflict"`) || !strings.Contains(conflict.Body.String(), `"status":"conflict"`) {
+		t.Fatalf("conflict rebuild status = %d, body = %s", conflict.Code, conflict.Body.String())
+	}
+
+	submitted := httptest.NewRecorder()
+	routes.ServeHTTP(submitted, httptest.NewRequest(http.MethodPost, "/v1/datasets/imported/rebuild", bytes.NewBufferString(`{}`)))
+	if submitted.Code != http.StatusAccepted ||
+		!strings.Contains(submitted.Body.String(), `"schema_version":"dataset-rebuild/v1"`) ||
+		!strings.Contains(submitted.Body.String(), `"status":"submitted"`) ||
+		!strings.Contains(submitted.Body.String(), `"job_type":"build_graph"`) {
+		t.Fatalf("rebuild status = %d, body = %s", submitted.Code, submitted.Body.String())
+	}
+	var rebuild struct {
+		JobID string `json:"job_id"`
+	}
+	if err := json.Unmarshal(submitted.Body.Bytes(), &rebuild); err != nil || rebuild.JobID == "" {
+		t.Fatalf("decode rebuild: id=%q err=%v body=%s", rebuild.JobID, err, submitted.Body.String())
+	}
+	job := waitForServiceJob(t, routes, rebuild.JobID, "succeeded")
+	if !containsArtifactStatus(job, "graph", "written") || !containsArtifactStatus(job, "chunks", "written") {
+		t.Fatalf("rebuild job artifacts = %#v", job["artifacts"])
+	}
+	if _, err := os.Stat(filepath.Join(root, "output", "retrieval_golden", "imported.json")); err != nil {
+		t.Fatalf("rebuild should preserve golden fixture: %v", err)
+	}
+
+	notManaged := httptest.NewRecorder()
+	routes.ServeHTTP(notManaged, httptest.NewRequest(http.MethodPost, "/v1/datasets/orphan/rebuild", bytes.NewBufferString(`{}`)))
+	if notManaged.Code != http.StatusNotFound || !strings.Contains(notManaged.Body.String(), "dataset_not_managed") {
+		t.Fatalf("not managed rebuild status = %d, body = %s", notManaged.Code, notManaged.Body.String())
+	}
+}
+
 func TestParseDocumentsJobLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "parse_worker.py")

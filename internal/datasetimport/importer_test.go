@@ -166,6 +166,46 @@ func TestDeleteSupportsDryRunForceAndOutputScope(t *testing.T) {
 	}
 }
 
+func TestPlanRebuildValidatesManagedDatasetAndConflicts(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(dir)
+	sourceCorpus := filepath.Join(dir, "source", "corpus.json")
+	sourceSchema := filepath.Join(dir, "source", "schema.json")
+	mustWrite(t, sourceCorpus, `[]`)
+	mustWrite(t, sourceSchema, `{}`)
+	if _, err := datasetimport.Import(cfg, datasetimport.Request{Dataset: "news", CorpusPath: sourceCorpus, SchemaPath: sourceSchema}); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	plan, spec, err := datasetimport.PlanRebuild(cfg, datasetimport.RebuildRequest{Dataset: "news", OverwriteOutput: true, DryRun: true})
+	if err != nil {
+		t.Fatalf("dry-run rebuild plan: %v", err)
+	}
+	if plan.SchemaVersion != "dataset-rebuild/v1" || plan.Status != "planned" || !plan.DryRun || spec.CorpusPath == "" || spec.SchemaPath == "" {
+		t.Fatalf("plan=%#v spec=%#v", plan, spec)
+	}
+
+	graph := filepath.Join(dir, "output", "graphs", "news_new.json")
+	mustWrite(t, graph, "[]")
+	_, _, err = datasetimport.PlanRebuild(cfg, datasetimport.RebuildRequest{Dataset: "news", OverwriteOutput: false})
+	if !errors.Is(err, datasetimport.ErrRebuildConflict) {
+		t.Fatalf("conflict err = %v", err)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "data", "uploaded", "news", "corpus.json")); err != nil {
+		t.Fatalf("remove corpus: %v", err)
+	}
+	_, _, err = datasetimport.PlanRebuild(cfg, datasetimport.RebuildRequest{Dataset: "news", OverwriteOutput: true})
+	if !errors.Is(err, datasetimport.ErrMissingArtifact) {
+		t.Fatalf("missing corpus err = %v", err)
+	}
+
+	_, _, err = datasetimport.PlanRebuild(cfg, datasetimport.RebuildRequest{Dataset: "orphan", OverwriteOutput: true})
+	if !errors.Is(err, datasetimport.ErrNotManaged) {
+		t.Fatalf("not managed err = %v", err)
+	}
+}
+
 func testConfig(root string) config.Config {
 	return config.Config{
 		ArtifactRoot:    root,

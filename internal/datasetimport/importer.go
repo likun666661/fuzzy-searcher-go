@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/fuzzy-searcher-go/internal/config"
@@ -29,6 +30,12 @@ var ErrNotManaged = errors.New("dataset is not managed")
 
 // ErrDeleteFailed means one or more managed artifacts could not be deleted.
 var ErrDeleteFailed = errors.New("dataset delete failed")
+
+// ErrMissingArtifact means a required managed artifact is absent.
+var ErrMissingArtifact = errors.New("missing managed artifact")
+
+// ErrRebuildConflict means outputs exist but overwrite was disabled.
+var ErrRebuildConflict = errors.New("dataset rebuild conflict")
 
 // Request is the stable dataset import request.
 type Request struct {
@@ -75,6 +82,35 @@ type DeleteRequest struct {
 	Force         bool
 }
 
+// RebuildRequest configures a rebuild operation for an existing managed
+// dataset.
+type RebuildRequest struct {
+	Dataset          string
+	OverwriteOutput  bool
+	DryRun           bool
+	ConfigPath       string
+	Mode             string
+	GraphOutputPath  string
+	ChunksOutputPath string
+	CacheDir         string
+	PythonBin        string
+	ScriptPath       string
+	WorkingDir       string
+}
+
+// RebuildPlan is the stable response shape for dataset rebuild requests.
+type RebuildPlan struct {
+	SchemaVersion   string          `json:"schema_version"`
+	Dataset         string          `json:"dataset"`
+	Status          string          `json:"status"`
+	DryRun          bool            `json:"dry_run"`
+	OverwriteOutput bool            `json:"overwrite_outputs"`
+	JobID           string          `json:"job_id,omitempty"`
+	JobType         string          `json:"job_type,omitempty"`
+	Artifacts       []jobs.Artifact `json:"artifacts"`
+	Errors          []string        `json:"errors"`
+}
+
 // DeleteError carries a failed delete result with per-artifact statuses.
 type DeleteError struct {
 	Result DeleteResult
@@ -86,6 +122,20 @@ func (e DeleteError) Error() string {
 }
 
 func (e DeleteError) Unwrap() error {
+	return e.Err
+}
+
+// RebuildError carries a rebuild plan with per-artifact conflict status.
+type RebuildError struct {
+	Result RebuildPlan
+	Err    error
+}
+
+func (e RebuildError) Error() string {
+	return e.Err.Error()
+}
+
+func (e RebuildError) Unwrap() error {
 	return e.Err
 }
 
@@ -229,6 +279,81 @@ func Delete(cfg config.Config, req DeleteRequest) (DeleteResult, error) {
 		}
 	}
 	return result, nil
+}
+
+// PlanRebuild validates a managed dataset and returns the build_graph spec plus
+// cleanup artifact plan. The caller owns job submission.
+func PlanRebuild(cfg config.Config, req RebuildRequest) (RebuildPlan, jobs.BuildGraphSpec, error) {
+	if !datasetNamePattern.MatchString(req.Dataset) {
+		return RebuildPlan{}, jobs.BuildGraphSpec{}, fmt.Errorf("%w: dataset must match %s", ErrInvalidDataset, datasetNamePattern.String())
+	}
+	paths := managedPaths(cfg, req.Dataset)
+	if _, err := os.Stat(paths.metadata); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return RebuildPlan{}, jobs.BuildGraphSpec{}, fmt.Errorf("%w: %s", ErrNotManaged, req.Dataset)
+		}
+		return RebuildPlan{}, jobs.BuildGraphSpec{}, fmt.Errorf("stat metadata %s: %w", paths.metadata, err)
+	}
+	missing := []string{}
+	if _, err := os.Stat(paths.corpus); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			missing = append(missing, "corpus")
+		} else {
+			return RebuildPlan{}, jobs.BuildGraphSpec{}, fmt.Errorf("stat corpus %s: %w", paths.corpus, err)
+		}
+	}
+	if _, err := os.Stat(paths.schema); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			missing = append(missing, "schema")
+		} else {
+			return RebuildPlan{}, jobs.BuildGraphSpec{}, fmt.Errorf("stat schema %s: %w", paths.schema, err)
+		}
+	}
+	if len(missing) > 0 {
+		return RebuildPlan{}, jobs.BuildGraphSpec{}, fmt.Errorf("%w: %s", ErrMissingArtifact, strings.Join(missing, ","))
+	}
+	spec := jobs.BuildGraphSpec{
+		Dataset:          req.Dataset,
+		CorpusPath:       paths.corpus,
+		SchemaPath:       paths.schema,
+		GraphOutputPath:  choosePath(req.GraphOutputPath, filepath.Join(cfg.GraphRoot, req.Dataset+"_new.json")),
+		ChunksOutputPath: choosePath(req.ChunksOutputPath, filepath.Join(cfg.ChunksRoot, req.Dataset+".txt")),
+		CacheDir:         choosePath(req.CacheDir, filepath.Join(cfg.CacheRoot, req.Dataset)),
+		ConfigPath:       req.ConfigPath,
+		Mode:             req.Mode,
+		PythonBin:        req.PythonBin,
+		ScriptPath:       req.ScriptPath,
+		WorkingDir:       req.WorkingDir,
+	}
+	artifacts := rebuildArtifacts(req, spec)
+	conflicts := []string{}
+	for _, artifact := range artifacts {
+		if artifact.Status == "conflict" {
+			conflicts = append(conflicts, fmt.Sprintf("%s output exists: %s", artifact.Name, artifact.Path))
+		}
+	}
+	status := "queued"
+	if req.DryRun {
+		status = "planned"
+	}
+	plan := RebuildPlan{
+		SchemaVersion:   "dataset-rebuild/v1",
+		Dataset:         req.Dataset,
+		Status:          status,
+		DryRun:          req.DryRun,
+		OverwriteOutput: req.OverwriteOutput,
+		JobType:         jobs.TypeBuildGraph,
+		Artifacts:       artifacts,
+		Errors:          conflicts,
+	}
+	if len(conflicts) > 0 {
+		plan.Status = "conflict"
+		return plan, jobs.BuildGraphSpec{}, RebuildError{
+			Result: plan,
+			Err:    fmt.Errorf("%w: %s", ErrRebuildConflict, req.Dataset),
+		}
+	}
+	return plan, spec, nil
 }
 
 func validateRequest(req Request) error {
@@ -391,6 +516,85 @@ func managedDeleteArtifacts(cfg config.Config, dataset string) []jobs.Artifact {
 			Description:   "Answer output for this dataset.",
 		},
 	}
+}
+
+func rebuildArtifacts(req RebuildRequest, spec jobs.BuildGraphSpec) []jobs.Artifact {
+	artifacts := []jobs.Artifact{
+		{
+			Name:        "corpus",
+			Role:        "input",
+			Kind:        "corpus_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.CorpusPath,
+			Status:      "configured",
+			Description: "Service-managed corpus consumed by the rebuild build_graph job.",
+		},
+		{
+			Name:        "schema",
+			Role:        "input",
+			Kind:        "schema_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.SchemaPath,
+			Status:      "configured",
+			Description: "Service-managed schema consumed by the rebuild build_graph job.",
+		},
+		{
+			Name:          "graph",
+			Role:          "output",
+			Kind:          "graph_json",
+			SchemaVersion: "youtu-graph/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.GraphOutputPath,
+			Description:   "Graph output rebuilt by build_graph.",
+		},
+		{
+			Name:        "chunks",
+			Role:        "output",
+			Kind:        "chunks_txt",
+			Dataset:     spec.Dataset,
+			Path:        spec.ChunksOutputPath,
+			Description: "Chunks output rebuilt by build_graph.",
+		},
+		{
+			Name:        "cache",
+			Role:        "output",
+			Kind:        "faiss_cache_dir",
+			Dataset:     spec.Dataset,
+			Path:        spec.CacheDir,
+			Description: "Vector cache output rebuilt by build_graph.",
+		},
+	}
+	for idx := range artifacts {
+		if artifacts[idx].Role == "output" {
+			artifacts[idx].Status = rebuildOutputStatus(req, artifacts[idx].Path)
+		}
+	}
+	return artifacts
+}
+
+func rebuildOutputStatus(req RebuildRequest, path string) string {
+	if path == "" {
+		return "missing"
+	}
+	_, err := os.Stat(path)
+	exists := err == nil
+	if req.DryRun {
+		if exists {
+			return "skipped"
+		}
+		return "missing"
+	}
+	if !req.OverwriteOutput && exists {
+		return "conflict"
+	}
+	return "pending"
+}
+
+func choosePath(value string, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 func isCoreDatasetArtifact(name string) bool {

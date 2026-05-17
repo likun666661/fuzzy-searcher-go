@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -54,6 +55,7 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("POST /v1/datasets/import", s.handleImportDataset)
 	mux.HandleFunc("GET /v1/datasets/{dataset}", s.handleDataset)
 	mux.HandleFunc("DELETE /v1/datasets/{dataset}", s.handleDeleteDataset)
+	mux.HandleFunc("POST /v1/datasets/{dataset}/rebuild", s.handleRebuildDataset)
 	mux.HandleFunc("GET /v1/datasets/{dataset}/artifacts", s.handleDatasetArtifacts)
 	mux.HandleFunc("GET /v1/sidecars", s.handleSidecars)
 	mux.HandleFunc("GET /v1/sidecars/vector/health", s.handleVectorSidecarHealth)
@@ -173,6 +175,71 @@ func (s *Service) handleDeleteDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+type rebuildDatasetRequest struct {
+	OverwriteOutputs *bool `json:"overwrite_outputs,omitempty"`
+	DryRun           bool  `json:"dry_run,omitempty"`
+	BuildGraph       struct {
+		ConfigPath       string `json:"config_path,omitempty"`
+		Mode             string `json:"mode,omitempty"`
+		GraphOutputPath  string `json:"graph_output_path,omitempty"`
+		ChunksOutputPath string `json:"chunks_output_path,omitempty"`
+		CacheDir         string `json:"cache_dir,omitempty"`
+		PythonBin        string `json:"python_bin,omitempty"`
+		ScriptPath       string `json:"script_path,omitempty"`
+		WorkingDir       string `json:"working_dir,omitempty"`
+	} `json:"build_graph,omitempty"`
+}
+
+func (s *Service) handleRebuildDataset(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("dataset")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_dataset", fmt.Errorf("dataset is required"))
+		return
+	}
+	var input rebuildDatasetRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid_json", err)
+			return
+		}
+	}
+	overwriteOutputs := true
+	if input.OverwriteOutputs != nil {
+		overwriteOutputs = *input.OverwriteOutputs
+	}
+	plan, spec, err := datasetimport.PlanRebuild(s.config, datasetimport.RebuildRequest{
+		Dataset:          name,
+		OverwriteOutput:  overwriteOutputs,
+		DryRun:           input.DryRun,
+		ConfigPath:       input.BuildGraph.ConfigPath,
+		Mode:             input.BuildGraph.Mode,
+		GraphOutputPath:  input.BuildGraph.GraphOutputPath,
+		ChunksOutputPath: input.BuildGraph.ChunksOutputPath,
+		CacheDir:         input.BuildGraph.CacheDir,
+		PythonBin:        input.BuildGraph.PythonBin,
+		ScriptPath:       input.BuildGraph.ScriptPath,
+		WorkingDir:       input.BuildGraph.WorkingDir,
+	})
+	if err != nil {
+		writeDatasetRebuildError(w, err)
+		return
+	}
+	if input.DryRun {
+		writeJSON(w, http.StatusOK, plan)
+		return
+	}
+	if overwriteOutputs {
+		if err := cleanupRebuildOutputs(plan.Artifacts); err != nil {
+			writeError(w, http.StatusInternalServerError, "dataset_rebuild_failed", err)
+			return
+		}
+	}
+	job := s.submitBuildGraphJob(s.buildGraphSpec(spec))
+	plan.Status = "submitted"
+	plan.JobID = job.ID
+	writeJSON(w, http.StatusAccepted, plan)
 }
 
 func (s *Service) handleDatasetArtifacts(w http.ResponseWriter, r *http.Request) {
@@ -1345,6 +1412,39 @@ func writeDatasetDeleteError(w http.ResponseWriter, result datasetimport.DeleteR
 	default:
 		writeError(w, http.StatusInternalServerError, "dataset_delete_failed", err)
 	}
+}
+
+func writeDatasetRebuildError(w http.ResponseWriter, err error) {
+	var rebuildErr datasetimport.RebuildError
+	switch {
+	case errors.As(err, &rebuildErr):
+		writeJSON(w, http.StatusConflict, rebuildErr.Result)
+	case errors.Is(err, datasetimport.ErrInvalidDataset):
+		writeError(w, http.StatusBadRequest, "invalid_dataset", err)
+	case errors.Is(err, datasetimport.ErrNotManaged):
+		writeError(w, http.StatusNotFound, "dataset_not_managed", err)
+	case errors.Is(err, datasetimport.ErrMissingArtifact):
+		writeError(w, http.StatusConflict, "dataset_not_ready", err)
+	case errors.Is(err, datasetimport.ErrRebuildConflict):
+		writeError(w, http.StatusConflict, "dataset_rebuild_conflict", err)
+	default:
+		writeError(w, http.StatusInternalServerError, "dataset_rebuild_failed", err)
+	}
+}
+
+func cleanupRebuildOutputs(artifacts []jobs.Artifact) error {
+	for _, artifact := range artifacts {
+		if artifact.Role != "output" || artifact.Path == "" {
+			continue
+		}
+		if artifact.Name != "graph" && artifact.Name != "chunks" && artifact.Name != "cache" {
+			continue
+		}
+		if err := os.RemoveAll(artifact.Path); err != nil {
+			return fmt.Errorf("delete rebuild artifact %s at %s: %w", artifact.Name, artifact.Path, err)
+		}
+	}
+	return nil
 }
 
 func queryBoolDefault(r *http.Request, key string, fallback bool) bool {

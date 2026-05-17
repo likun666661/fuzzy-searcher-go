@@ -64,6 +64,7 @@ It currently exposes the first service milestone:
 - `POST /v1/datasets/import`
 - `GET /v1/datasets/{dataset}`
 - `DELETE /v1/datasets/{dataset}`
+- `POST /v1/datasets/{dataset}/rebuild`
 - `GET /v1/datasets/{dataset}/artifacts`
 - `GET /v1/sidecars`
 - `GET /v1/sidecars/vector/health`
@@ -214,6 +215,18 @@ Delete defaults to datasets with service metadata and only removes managed
 paths. Use `force=true` to clean known managed paths when metadata is already
 missing, and `include_outputs=false` to keep graph/chunks/cache/golden/trace
 outputs. See `docs/contracts/dataset_lifecycle.md`.
+
+To rebuild graph/chunks/cache for a managed dataset:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/datasets/news_2026/rebuild \
+  -H 'content-type: application/json' \
+  -d '{"overwrite_outputs": true}'
+```
+
+Rebuild validates managed corpus/schema/metadata, optionally cleans graph,
+chunks, and cache outputs, then submits a `build_graph` async job. Use
+`dry_run=true` to inspect the plan without deleting outputs or creating a job.
 
 By default the registry looks for a sibling `../youtu-graphrag` checkout. In a
 clean clone elsewhere, set `YOUTU_RAG_ARTIFACT_ROOT` or the individual root
