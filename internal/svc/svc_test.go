@@ -1701,6 +1701,201 @@ with open(chunks, "w", encoding="utf-8") as f:
 	}
 }
 
+func TestCreateDatasetWorkflowParseFailureStopsImportAndBuild(t *testing.T) {
+	dir := t.TempDir()
+	parseScript := filepath.Join(dir, "parse_worker.py")
+	buildScript := filepath.Join(dir, "build_worker.py")
+	document := filepath.Join(dir, "incoming", "doc.txt")
+	schemaPath := filepath.Join(dir, "incoming", "schema.json")
+	buildMarker := filepath.Join(dir, "build-called")
+	mustWrite(t, document, "hello dataset")
+	mustWrite(t, schemaPath, `{"entities":[]}`)
+	writeExecutable(t, parseScript, `#!/usr/bin/env python3
+import sys
+print("parse exploded", file=sys.stderr)
+raise SystemExit(8)
+`)
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import pathlib
+pathlib.Path("`+buildMarker+`").write_text("called", encoding="utf-8")
+`)
+	routes := svc.NewService(createDatasetTestConfig(dir, parseScript, buildScript)).Routes()
+
+	workflow := createDatasetWorkflow(t, routes, "imported", []string{document}, schemaPath)
+	workflow = waitForWorkflow(t, routes, workflow["id"].(string), "failed")
+	if errorText, _ := workflow["error"].(string); !strings.Contains(errorText, "parse_documents step failed") || !strings.Contains(errorText, "parse exploded") {
+		t.Fatalf("workflow error = %#v", workflow["error"])
+	}
+	if !containsWorkflowStep(workflow, "parse_documents", "parse_documents", "failed") {
+		t.Fatalf("workflow steps = %#v", workflow["steps"])
+	}
+	if containsWorkflowStepNamed(workflow, "dataset_import") || containsWorkflowStepNamed(workflow, "build_graph") {
+		t.Fatalf("workflow should stop after parse failure: %#v", workflow["steps"])
+	}
+	if _, err := os.Stat(buildMarker); !os.IsNotExist(err) {
+		t.Fatalf("build worker should not have been called; stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "output", "datasets", "imported.json")); !os.IsNotExist(err) {
+		t.Fatalf("dataset metadata should not exist after parse failure, stat err = %v", err)
+	}
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/events", nil))
+	if events.Code != http.StatusOK ||
+		!strings.Contains(events.Body.String(), `"step_failed"`) ||
+		strings.Contains(events.Body.String(), "dataset_imported") ||
+		strings.Contains(events.Body.String(), "artifact_handoff") {
+		t.Fatalf("parse failure workflow events status = %d, body = %s", events.Code, events.Body.String())
+	}
+}
+
+func TestCreateDatasetWorkflowImportFailureStopsBuild(t *testing.T) {
+	dir := t.TempDir()
+	parseScript := filepath.Join(dir, "parse_worker.py")
+	buildScript := filepath.Join(dir, "build_worker.py")
+	document := filepath.Join(dir, "incoming", "doc.txt")
+	schemaPath := filepath.Join(dir, "incoming", "bad_schema.json")
+	buildMarker := filepath.Join(dir, "build-called")
+	mustWrite(t, document, "hello dataset")
+	mustWrite(t, schemaPath, `{"entities":`)
+	writeCreateDatasetParseWorker(t, parseScript)
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import pathlib
+pathlib.Path("`+buildMarker+`").write_text("called", encoding="utf-8")
+`)
+	routes := svc.NewService(createDatasetTestConfig(dir, parseScript, buildScript)).Routes()
+
+	workflow := createDatasetWorkflow(t, routes, "imported", []string{document}, schemaPath)
+	workflow = waitForWorkflow(t, routes, workflow["id"].(string), "failed")
+	if errorText, _ := workflow["error"].(string); !strings.Contains(errorText, "dataset import step failed") || !strings.Contains(errorText, "parse schema json") {
+		t.Fatalf("workflow error = %#v", workflow["error"])
+	}
+	if !containsWorkflowStep(workflow, "parse_documents", "parse_documents", "succeeded") ||
+		!containsWorkflowStep(workflow, "dataset_import", "dataset_import", "failed") {
+		t.Fatalf("workflow steps = %#v", workflow["steps"])
+	}
+	if containsWorkflowStepNamed(workflow, "build_graph") {
+		t.Fatalf("build step should not start after import failure: %#v", workflow["steps"])
+	}
+	if !containsArtifactStatus(workflow, "parsed_corpus", "written") ||
+		!containsArtifactStatus(workflow, "metadata", "failed") {
+		t.Fatalf("workflow artifacts after import failure = %#v", workflow["artifacts"])
+	}
+	if _, err := os.Stat(buildMarker); !os.IsNotExist(err) {
+		t.Fatalf("build worker should not have been called; stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "output", "datasets", "imported.json")); !os.IsNotExist(err) {
+		t.Fatalf("dataset metadata should not exist after import failure, stat err = %v", err)
+	}
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/events", nil))
+	if events.Code != http.StatusOK ||
+		!strings.Contains(events.Body.String(), `"dataset_import_failed"`) ||
+		strings.Contains(events.Body.String(), "artifact_handoff") {
+		t.Fatalf("import failure workflow events status = %d, body = %s", events.Code, events.Body.String())
+	}
+}
+
+func TestCreateDatasetWorkflowBuildFailurePreservesImportedArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	parseScript := filepath.Join(dir, "parse_worker.py")
+	buildScript := filepath.Join(dir, "build_worker.py")
+	document := filepath.Join(dir, "incoming", "doc.txt")
+	schemaPath := filepath.Join(dir, "incoming", "schema.json")
+	mustWrite(t, document, "hello dataset")
+	mustWrite(t, schemaPath, `{"entities":[]}`)
+	writeCreateDatasetParseWorker(t, parseScript)
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import sys
+print("build exploded", file=sys.stderr)
+raise SystemExit(9)
+`)
+	routes := svc.NewService(createDatasetTestConfig(dir, parseScript, buildScript)).Routes()
+
+	workflow := createDatasetWorkflow(t, routes, "imported", []string{document}, schemaPath)
+	workflow = waitForWorkflow(t, routes, workflow["id"].(string), "failed")
+	if errorText, _ := workflow["error"].(string); !strings.Contains(errorText, "build_graph step failed") || !strings.Contains(errorText, "build exploded") {
+		t.Fatalf("workflow error = %#v", workflow["error"])
+	}
+	if !containsWorkflowStep(workflow, "parse_documents", "parse_documents", "succeeded") ||
+		!containsWorkflowStep(workflow, "dataset_import", "dataset_import", "succeeded") ||
+		!containsWorkflowStep(workflow, "build_graph", "build_graph", "failed") {
+		t.Fatalf("workflow steps = %#v", workflow["steps"])
+	}
+	for _, name := range []string{"parsed_corpus", "corpus", "schema", "metadata"} {
+		if !containsArtifactStatus(workflow, name, "written") {
+			t.Fatalf("workflow artifact %s not preserved as written: %#v", name, workflow["artifacts"])
+		}
+	}
+	if containsArtifactStatus(workflow, "graph", "written") || containsArtifactStatus(workflow, "chunks", "written") {
+		t.Fatalf("graph/chunks should not be written after build failure: %#v", workflow["artifacts"])
+	}
+	for _, path := range []string{
+		filepath.Join(dir, "data", "uploaded", "imported", "corpus.json"),
+		filepath.Join(dir, "schemas", "imported.json"),
+		filepath.Join(dir, "output", "datasets", "imported.json"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("imported artifact should be preserved %s: %v", path, err)
+		}
+	}
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+workflow["id"].(string)+"/events", nil))
+	if events.Code != http.StatusOK ||
+		!strings.Contains(events.Body.String(), `"dataset_imported"`) ||
+		!strings.Contains(events.Body.String(), `"artifact_handoff"`) ||
+		!strings.Contains(events.Body.String(), "build exploded") {
+		t.Fatalf("build failure workflow events status = %d, body = %s", events.Code, events.Body.String())
+	}
+}
+
+func TestCreateDatasetWorkflowCancelPropagatesToParseJob(t *testing.T) {
+	dir := t.TempDir()
+	parseScript := filepath.Join(dir, "parse_worker.py")
+	buildScript := filepath.Join(dir, "build_worker.py")
+	document := filepath.Join(dir, "incoming", "doc.txt")
+	schemaPath := filepath.Join(dir, "incoming", "schema.json")
+	buildMarker := filepath.Join(dir, "build-called")
+	mustWrite(t, document, "hello dataset")
+	mustWrite(t, schemaPath, `{"entities":[]}`)
+	writeExecutable(t, parseScript, `#!/usr/bin/env python3
+import time
+time.sleep(10)
+`)
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import pathlib
+pathlib.Path("`+buildMarker+`").write_text("called", encoding="utf-8")
+`)
+	routes := svc.NewService(createDatasetTestConfig(dir, parseScript, buildScript)).Routes()
+
+	workflow := createDatasetWorkflow(t, routes, "imported", []string{document}, schemaPath)
+	id := workflow["id"].(string)
+	_ = waitForWorkflowStep(t, routes, id, "parse_documents")
+
+	cancel := httptest.NewRecorder()
+	routes.ServeHTTP(cancel, httptest.NewRequest(http.MethodPost, "/v1/workflows/"+id+"/cancel", nil))
+	if cancel.Code != http.StatusOK || !strings.Contains(cancel.Body.String(), `"canceled":true`) {
+		t.Fatalf("cancel create_dataset status = %d, body = %s", cancel.Code, cancel.Body.String())
+	}
+	workflow = waitForWorkflow(t, routes, id, "canceled")
+	if !containsWorkflowStep(workflow, "parse_documents", "parse_documents", "canceled") {
+		t.Fatalf("parse step not canceled: %#v", workflow["steps"])
+	}
+	if containsWorkflowStepNamed(workflow, "dataset_import") || containsWorkflowStepNamed(workflow, "build_graph") {
+		t.Fatalf("workflow should stop after cancellation: %#v", workflow["steps"])
+	}
+	if _, err := os.Stat(buildMarker); !os.IsNotExist(err) {
+		t.Fatalf("build worker should not have been called; stat err = %v", err)
+	}
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/workflows/"+id+"/events", nil))
+	if events.Code != http.StatusOK ||
+		!strings.Contains(events.Body.String(), `"cancel_requested"`) ||
+		!strings.Contains(events.Body.String(), `"canceled"`) ||
+		strings.Contains(events.Body.String(), "dataset_imported") {
+		t.Fatalf("create_dataset cancel events status = %d, body = %s", events.Code, events.Body.String())
+	}
+}
+
 func TestWorkflowListAndStepInspectionEndpoints(t *testing.T) {
 	dir := t.TempDir()
 	buildScript := filepath.Join(dir, "build_worker.py")
@@ -2017,6 +2212,63 @@ func parseDocumentsTestConfig(dir string, script string) config.Config {
 		WorkerCWD:       dir,
 		DatasetNames:    []string{"demo"},
 	}
+}
+
+func createDatasetTestConfig(dir string, parseScript string, buildScript string) config.Config {
+	return config.Config{
+		DefaultDataset:   "demo",
+		ArtifactRoot:     dir,
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		DatasetMetaRoot:  filepath.Join(dir, "output", "datasets"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		WorkflowRoot:     filepath.Join(dir, "workflows"),
+		PythonBin:        "python3",
+		ParseDocsScript:  parseScript,
+		BuildGraphScript: buildScript,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	}
+}
+
+func writeCreateDatasetParseWorker(t *testing.T, path string) {
+	t.Helper()
+	writeExecutable(t, path, `#!/usr/bin/env python3
+import json
+import os
+import sys
+dataset = sys.argv[sys.argv.index("--dataset") + 1]
+output = sys.argv[sys.argv.index("--output") + 1]
+document = sys.argv[sys.argv.index("--document") + 1]
+os.makedirs(os.path.dirname(output), exist_ok=True)
+with open(output, "w", encoding="utf-8") as f:
+    json.dump([{"id": dataset + "-doc-1", "text": open(document, encoding="utf-8").read()}], f)
+`)
+}
+
+func createDatasetWorkflow(t *testing.T, routes http.Handler, dataset string, documents []string, schemaPath string) map[string]any {
+	t.Helper()
+	documentJSON := make([]string, 0, len(documents))
+	for _, document := range documents {
+		documentJSON = append(documentJSON, quote(document))
+	}
+	body := `{"type":"create_dataset","create_dataset":{"dataset":` + quote(dataset) + `,"document_paths":[` + strings.Join(documentJSON, ",") + `],"schema_path":` + quote(schemaPath) + `}}`
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/workflows", bytes.NewBufferString(body)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create create_dataset workflow status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var workflow map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &workflow); err != nil {
+		t.Fatalf("decode create_dataset workflow: %v", err)
+	}
+	if workflow["id"] == "" || workflow["schema_version"] != "workflow/v1" || workflow["type"] != "create_dataset" {
+		t.Fatalf("created create_dataset workflow = %#v", workflow)
+	}
+	return workflow
 }
 
 func createParseDocumentsJob(t *testing.T, routes http.Handler, document string) map[string]any {
