@@ -33,7 +33,8 @@ Stable fields:
 
 - `schema_version`: job envelope version. Current value is `service-job/v1`.
 - `id`: service-assigned job id.
-- `type`: job type. Current implemented type is `retrieve`.
+- `type`: job type. Current implemented types are `retrieve` and
+  `generate_golden`.
 - `status`: one of `queued`, `running`, `succeeded`, `failed`, `canceled`.
 - `spec`: typed request payload for the job type.
 - `artifacts`: input/output artifact metadata.
@@ -135,13 +136,69 @@ Retrieve jobs currently report these artifacts:
 - `retrieve_result`: output `retrieve_result_json`,
   `schema_version=retrieve-result/v1`, stored inline in `job.result`.
 
+## Implemented Job: generate_golden
+
+`generate_golden` turns the existing Python retriever golden generator into a
+tracked service job. Go owns the job envelope, lifecycle events, persistence,
+worker command execution, stdout/stderr capture, and artifact metadata. Python
+continues to own the retriever runtime and fixture generation logic.
+
+Submit:
+
+```http
+POST /v1/jobs
+content-type: application/json
+```
+
+```json
+{
+  "type": "generate_golden",
+  "generate_golden": {
+    "dataset": "demo",
+    "limit": 1,
+    "output_path": "/abs/path/youtu-graphrag/output/retrieval_golden/demo.json"
+  }
+}
+```
+
+The service stores this as a typed `GenerateGoldenSpec` in `job.spec`.
+Minimum stable fields are `dataset`, `limit`, and `output_path`. The resolved
+worker command fields are also persisted:
+
+```json
+{
+  "dataset": "demo",
+  "output_path": "/abs/path/youtu-graphrag/output/retrieval_golden/demo.json",
+  "limit": 1,
+  "python_bin": "/abs/path/youtu-graphrag/.venv/bin/python",
+  "script_path": "/abs/path/youtu-graphrag/scripts/generate_retriever_golden.py",
+  "working_dir": "/abs/path/youtu-graphrag"
+}
+```
+
+`generate_golden` jobs report a `golden_fixture` output artifact:
+
+- `name=golden_fixture`
+- `role=output`
+- `kind=retriever_golden_json`
+- `schema_version=retriever-golden/v1`
+- `path=job.spec.output_path`
+- `status=pending` while the job is running and `written` after successful
+  output validation
+
+Completed jobs return a small inline `generate-golden-result/v1` result with
+the dataset, output path, and captured stdout/stderr. The full fixture remains
+on disk as the `golden_fixture` artifact.
+
+The detailed Python worker command contract is defined in
+`docs/contracts/generate_golden_worker.md`.
+
 ## Planned Job Types
 
 These types are named now so later work can extend the same contract instead of
 inventing a new shape:
 
 - `build_graph`: long-running Python graph construction worker.
-- `generate_golden`: fixture/golden generation for regression tests.
 - `answer`: retrieval plus decomposition/LLM answer generation.
 
 The first implementation may return `unsupported job type` for these until the
