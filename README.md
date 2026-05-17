@@ -187,6 +187,19 @@ curl -s http://127.0.0.1:8080/v1/datasets
 curl -s http://127.0.0.1:8080/v1/datasets/demo/artifacts
 ```
 
+Dataset lifecycle operations are recorded separately so operators can audit
+imports, create_dataset workflows, rebuilds, and deletes after restart:
+
+```bash
+curl -s http://127.0.0.1:8080/v1/dataset-operations
+curl -s http://127.0.0.1:8080/v1/datasets/demo/operations
+curl -s http://127.0.0.1:8080/v1/dataset-operations/<operation_id>
+```
+
+Operation records persist under `YOUTU_RAG_DATASET_OPS_ROOT` by defaulting to
+`$YOUTU_RAG_ARTIFACT_ROOT/output/dataset_operations`. See
+`docs/contracts/dataset_operations.md`.
+
 To import a prepared corpus/schema pair into service-managed artifact roots:
 
 ```bash

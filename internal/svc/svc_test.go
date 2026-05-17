@@ -560,6 +560,134 @@ with open(chunks, "w", encoding="utf-8") as f:
 	}
 }
 
+func TestDatasetOperationHistoryEndpoints(t *testing.T) {
+	root := t.TempDir()
+	sourceCorpus := filepath.Join(root, "incoming", "corpus.json")
+	sourceSchema := filepath.Join(root, "incoming", "schema.json")
+	document := filepath.Join(root, "incoming", "doc.txt")
+	parseScript := filepath.Join(root, "workers", "parse.py")
+	buildScript := filepath.Join(root, "workers", "build.py")
+	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
+	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	mustWrite(t, document, "hello")
+	mustMkdir(t, filepath.Dir(parseScript))
+	writeExecutable(t, parseScript, `#!/usr/bin/env python3
+import json
+import os
+import sys
+dataset = sys.argv[sys.argv.index("--dataset") + 1]
+output = sys.argv[sys.argv.index("--output") + 1]
+os.makedirs(os.path.dirname(output), exist_ok=True)
+with open(output, "w", encoding="utf-8") as f:
+    json.dump([{"id": dataset + "-doc-1", "text": "hello"}], f)
+`)
+	writeExecutable(t, buildScript, `#!/usr/bin/env python3
+import json
+import os
+import sys
+graph = sys.argv[sys.argv.index("--graph-output") + 1]
+chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
+cache = sys.argv[sys.argv.index("--cache-dir") + 1]
+os.makedirs(os.path.dirname(graph), exist_ok=True)
+os.makedirs(os.path.dirname(chunks), exist_ok=True)
+os.makedirs(cache, exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    json.dump([], f)
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: c1\tChunk: hello\n")
+`)
+	cfg := config.Config{
+		ArtifactRoot:     root,
+		DefaultDataset:   "demo",
+		CorpusRoot:       filepath.Join(root, "data"),
+		SchemaRoot:       filepath.Join(root, "schemas"),
+		GraphRoot:        filepath.Join(root, "output", "graphs"),
+		ChunksRoot:       filepath.Join(root, "output", "chunks"),
+		CacheRoot:        filepath.Join(root, "retriever", "faiss_cache_new"),
+		GoldenRoot:       filepath.Join(root, "output", "retrieval_golden"),
+		TraceRoot:        filepath.Join(root, "output", "retrieval_traces"),
+		DatasetMetaRoot:  filepath.Join(root, "output", "datasets"),
+		DatasetOpsRoot:   filepath.Join(root, "output", "dataset_operations"),
+		JobRoot:          filepath.Join(root, "jobs"),
+		WorkflowRoot:     filepath.Join(root, "workflows"),
+		PythonBin:        "python3",
+		ParseDocsScript:  parseScript,
+		BuildGraphScript: buildScript,
+		WorkerCWD:        root,
+		DatasetNames:     []string{"demo"},
+	}
+	routes := svc.NewService(cfg).Routes()
+
+	imported := httptest.NewRecorder()
+	routes.ServeHTTP(imported, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"imported","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(sourceSchema)+`}`)))
+	if imported.Code != http.StatusCreated {
+		t.Fatalf("import status = %d, body = %s", imported.Code, imported.Body.String())
+	}
+	rebuild := httptest.NewRecorder()
+	routes.ServeHTTP(rebuild, httptest.NewRequest(http.MethodPost, "/v1/datasets/imported/rebuild", bytes.NewBufferString(`{"dry_run":true}`)))
+	if rebuild.Code != http.StatusOK {
+		t.Fatalf("rebuild status = %d, body = %s", rebuild.Code, rebuild.Body.String())
+	}
+	deleted := httptest.NewRecorder()
+	routes.ServeHTTP(deleted, httptest.NewRequest(http.MethodDelete, "/v1/datasets/imported?dry_run=true", nil))
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", deleted.Code, deleted.Body.String())
+	}
+	created := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"type":"create_dataset","create_dataset":{"dataset":"created","document_paths":[` + quote(document) + `],"schema_path":` + quote(sourceSchema) + `}}`)
+	routes.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/v1/workflows", body))
+	if created.Code != http.StatusAccepted {
+		t.Fatalf("create_dataset workflow status = %d, body = %s", created.Code, created.Body.String())
+	}
+	var createdWorkflow struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createdWorkflow); err != nil || createdWorkflow.ID == "" {
+		t.Fatalf("decode create_dataset workflow: id=%q err=%v body=%s", createdWorkflow.ID, err, created.Body.String())
+	}
+	_ = waitForWorkflow(t, routes, createdWorkflow.ID, "succeeded")
+
+	all := httptest.NewRecorder()
+	routes.ServeHTTP(all, httptest.NewRequest(http.MethodGet, "/v1/dataset-operations", nil))
+	if all.Code != http.StatusOK ||
+		!strings.Contains(all.Body.String(), `"schema_version":"dataset-operation-list/v1"`) ||
+		!strings.Contains(all.Body.String(), `"type":"import"`) ||
+		!strings.Contains(all.Body.String(), `"type":"rebuild"`) ||
+		!strings.Contains(all.Body.String(), `"type":"delete"`) ||
+		!strings.Contains(all.Body.String(), `"type":"create_dataset"`) ||
+		!strings.Contains(all.Body.String(), `"workflow_id"`) {
+		t.Fatalf("operations list status = %d, body = %s", all.Code, all.Body.String())
+	}
+	var listed struct {
+		Operations []struct {
+			ID      string `json:"id"`
+			Dataset string `json:"dataset"`
+			Type    string `json:"type"`
+		} `json:"operations"`
+	}
+	if err := json.Unmarshal(all.Body.Bytes(), &listed); err != nil || len(listed.Operations) < 4 {
+		t.Fatalf("decode operations: count=%d err=%v body=%s", len(listed.Operations), err, all.Body.String())
+	}
+	detailID := listed.Operations[0].ID
+	detail := httptest.NewRecorder()
+	routes.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/v1/dataset-operations/"+detailID, nil))
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"schema_version":"dataset-operation/v1"`) {
+		t.Fatalf("operation detail status = %d, body = %s", detail.Code, detail.Body.String())
+	}
+	filtered := httptest.NewRecorder()
+	routes.ServeHTTP(filtered, httptest.NewRequest(http.MethodGet, "/v1/datasets/imported/operations", nil))
+	if filtered.Code != http.StatusOK ||
+		!strings.Contains(filtered.Body.String(), `"dataset":"imported"`) ||
+		strings.Contains(filtered.Body.String(), `"dataset":"created"`) {
+		t.Fatalf("dataset operations status = %d, body = %s", filtered.Code, filtered.Body.String())
+	}
+	restarted := httptest.NewRecorder()
+	svc.NewService(cfg).Routes().ServeHTTP(restarted, httptest.NewRequest(http.MethodGet, "/v1/dataset-operations", nil))
+	if restarted.Code != http.StatusOK || !strings.Contains(restarted.Body.String(), `"type":"import"`) {
+		t.Fatalf("restarted operations status = %d, body = %s", restarted.Code, restarted.Body.String())
+	}
+}
+
 func TestParseDocumentsJobLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "parse_worker.py")

@@ -30,6 +30,7 @@ type Config struct {
 	GoldenRoot       string
 	TraceRoot        string
 	DatasetMetaRoot  string
+	DatasetOpsRoot   string
 	JobRoot          string
 	WorkflowRoot     string
 	PythonBin        string
@@ -66,6 +67,7 @@ func Load() Config {
 		GoldenRoot:       getenv("YOUTU_RAG_GOLDEN_ROOT", filepath.Join(artifactRoot, "output", "retrieval_golden")),
 		TraceRoot:        getenv("YOUTU_RAG_TRACE_ROOT", filepath.Join(artifactRoot, "output", "retrieval_traces")),
 		DatasetMetaRoot:  getenv("YOUTU_RAG_DATASET_META_ROOT", filepath.Join(artifactRoot, "output", "datasets")),
+		DatasetOpsRoot:   getenv("YOUTU_RAG_DATASET_OPS_ROOT", filepath.Join(artifactRoot, "output", "dataset_operations")),
 		JobRoot:          getenv("YOUTU_RAG_JOB_ROOT", filepath.Join(artifactRoot, "output", "jobs")),
 		WorkflowRoot:     getenv("YOUTU_RAG_WORKFLOW_ROOT", filepath.Join(artifactRoot, "output", "workflows")),
 		PythonBin:        getenv("YOUTU_RAG_PYTHON", filepath.Join(artifactRoot, ".venv", "bin", "python")),

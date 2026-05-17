@@ -14,6 +14,7 @@ import (
 	"github.com/fuzzy-searcher-go/internal/artifacts"
 	"github.com/fuzzy-searcher-go/internal/config"
 	"github.com/fuzzy-searcher-go/internal/datasetimport"
+	"github.com/fuzzy-searcher-go/internal/datasetops"
 	"github.com/fuzzy-searcher-go/internal/jobs"
 	"github.com/fuzzy-searcher-go/internal/orchestrator"
 	"github.com/fuzzy-searcher-go/internal/sidecarstatus"
@@ -31,6 +32,7 @@ type Service struct {
 	retriever *orchestrator.Retriever
 	jobs      *jobs.Manager
 	workflows *workflows.Manager
+	ops       *datasetops.Store
 }
 
 // NewService constructs the service layer.
@@ -42,6 +44,7 @@ func NewService(config config.Config) *Service {
 		workflows: workflows.NewManager(
 			workflows.WithFileStore(config.WorkflowRoot),
 		),
+		ops: datasetops.NewStore(config.DatasetOpsRoot),
 	}
 }
 
@@ -53,9 +56,12 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/version", s.handleVersion)
 	mux.HandleFunc("GET /v1/datasets", s.handleDatasets)
 	mux.HandleFunc("POST /v1/datasets/import", s.handleImportDataset)
+	mux.HandleFunc("GET /v1/dataset-operations", s.handleDatasetOperations)
+	mux.HandleFunc("GET /v1/dataset-operations/{operation_id}", s.handleDatasetOperation)
 	mux.HandleFunc("GET /v1/datasets/{dataset}", s.handleDataset)
 	mux.HandleFunc("DELETE /v1/datasets/{dataset}", s.handleDeleteDataset)
 	mux.HandleFunc("POST /v1/datasets/{dataset}/rebuild", s.handleRebuildDataset)
+	mux.HandleFunc("GET /v1/datasets/{dataset}/operations", s.handleDatasetOperationsForDataset)
 	mux.HandleFunc("GET /v1/datasets/{dataset}/artifacts", s.handleDatasetArtifacts)
 	mux.HandleFunc("GET /v1/sidecars", s.handleSidecars)
 	mux.HandleFunc("GET /v1/sidecars/vector/health", s.handleVectorSidecarHealth)
@@ -134,6 +140,25 @@ func (s *Service) handleDatasets(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Service) handleDatasetOperations(w http.ResponseWriter, r *http.Request) {
+	operations := s.ops.List("")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"schema_version": "dataset-operation-list/v1",
+		"count":          len(operations),
+		"operations":     operations,
+	})
+}
+
+func (s *Service) handleDatasetOperation(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("operation_id")
+	op, err := s.ops.Get(id)
+	if err != nil {
+		writeDatasetOperationError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, op)
+}
+
 func (s *Service) handleImportDataset(w http.ResponseWriter, r *http.Request) {
 	var input datasetimport.Request
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -142,9 +167,24 @@ func (s *Service) handleImportDataset(w http.ResponseWriter, r *http.Request) {
 	}
 	metadata, err := datasetimport.Import(s.config, input)
 	if err != nil {
+		s.recordDatasetOperation(datasetops.Operation{
+			Dataset: input.Dataset,
+			Type:    datasetops.TypeImport,
+			Status:  "failed",
+			Request: input,
+			Error:   err.Error(),
+		})
 		writeDatasetImportError(w, err)
 		return
 	}
+	s.recordDatasetOperation(datasetops.Operation{
+		Dataset:   metadata.Dataset,
+		Type:      datasetops.TypeImport,
+		Status:    "succeeded",
+		Request:   input,
+		Artifacts: metadata.Artifacts,
+		Result:    metadata,
+	})
 	writeJSON(w, http.StatusCreated, metadata)
 }
 
@@ -171,9 +211,24 @@ func (s *Service) handleDeleteDataset(w http.ResponseWriter, r *http.Request) {
 		Force:         queryBoolDefault(r, "force", false),
 	})
 	if err != nil {
+		s.recordDatasetOperation(datasetops.Operation{
+			Dataset:   result.Dataset,
+			Type:      datasetops.TypeDelete,
+			Status:    "failed",
+			Artifacts: result.Artifacts,
+			Result:    result,
+			Error:     err.Error(),
+		})
 		writeDatasetDeleteError(w, result, err)
 		return
 	}
+	s.recordDatasetOperation(datasetops.Operation{
+		Dataset:   result.Dataset,
+		Type:      datasetops.TypeDelete,
+		Status:    operationStatusFromDatasetDelete(result),
+		Artifacts: result.Artifacts,
+		Result:    result,
+	})
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -223,10 +278,38 @@ func (s *Service) handleRebuildDataset(w http.ResponseWriter, r *http.Request) {
 		WorkingDir:       input.BuildGraph.WorkingDir,
 	})
 	if err != nil {
+		var rebuildErr datasetimport.RebuildError
+		if errors.As(err, &rebuildErr) {
+			s.recordDatasetOperation(datasetops.Operation{
+				Dataset:   rebuildErr.Result.Dataset,
+				Type:      datasetops.TypeRebuild,
+				Status:    "failed",
+				Request:   input,
+				Artifacts: rebuildErr.Result.Artifacts,
+				Result:    rebuildErr.Result,
+				Error:     err.Error(),
+			})
+		} else {
+			s.recordDatasetOperation(datasetops.Operation{
+				Dataset: name,
+				Type:    datasetops.TypeRebuild,
+				Status:  "failed",
+				Request: input,
+				Error:   err.Error(),
+			})
+		}
 		writeDatasetRebuildError(w, err)
 		return
 	}
 	if input.DryRun {
+		s.recordDatasetOperation(datasetops.Operation{
+			Dataset:   plan.Dataset,
+			Type:      datasetops.TypeRebuild,
+			Status:    plan.Status,
+			Request:   input,
+			Artifacts: plan.Artifacts,
+			Result:    plan,
+		})
 		writeJSON(w, http.StatusOK, plan)
 		return
 	}
@@ -239,6 +322,19 @@ func (s *Service) handleRebuildDataset(w http.ResponseWriter, r *http.Request) {
 	job := s.submitBuildGraphJob(s.buildGraphSpec(spec))
 	plan.Status = "submitted"
 	plan.JobID = job.ID
+	s.recordDatasetOperation(datasetops.Operation{
+		Dataset: plan.Dataset,
+		Type:    datasetops.TypeRebuild,
+		Status:  "running",
+		Request: input,
+		JobRefs: []datasetops.JobRef{{
+			Name:  "build_graph",
+			JobID: job.ID,
+			Type:  job.Type,
+		}},
+		Artifacts: plan.Artifacts,
+		Result:    plan,
+	})
 	writeJSON(w, http.StatusAccepted, plan)
 }
 
@@ -252,6 +348,21 @@ func (s *Service) handleDatasetArtifacts(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"dataset":   name,
 		"artifacts": registry.Artifacts(name),
+	})
+}
+
+func (s *Service) handleDatasetOperationsForDataset(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("dataset")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_dataset", fmt.Errorf("dataset is required"))
+		return
+	}
+	operations := s.ops.List(name)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"schema_version": "dataset-operation-list/v1",
+		"count":          len(operations),
+		"dataset":        name,
+		"operations":     operations,
 	})
 }
 
@@ -769,6 +880,21 @@ func (s *Service) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 		artifacts := createDatasetArtifacts(spec)
 		workflow := s.workflows.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *workflows.Recorder) (any, error) {
 			return s.runCreateDatasetWorkflow(ctx, recorder, spec)
+		})
+		s.recordDatasetOperation(datasetops.Operation{
+			Dataset: spec.Dataset,
+			Type:    datasetops.TypeCreateDataset,
+			Status:  "running",
+			Request: input.CreateDataset,
+			WorkflowRefs: []datasetops.WorkflowRef{{
+				Name:       "create_dataset",
+				WorkflowID: workflow.ID,
+				Type:       workflow.Type,
+			}},
+			Artifacts: artifacts,
+			Result: map[string]any{
+				"workflow_id": workflow.ID,
+			},
 		})
 		writeJSON(w, http.StatusAccepted, workflow)
 	case "":
@@ -1429,6 +1555,32 @@ func writeDatasetRebuildError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "dataset_rebuild_conflict", err)
 	default:
 		writeError(w, http.StatusInternalServerError, "dataset_rebuild_failed", err)
+	}
+}
+
+func writeDatasetOperationError(w http.ResponseWriter, err error) {
+	if errors.Is(err, datasetops.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "dataset_operation_not_found", err)
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "dataset_operation_failed", err)
+}
+
+func (s *Service) recordDatasetOperation(op datasetops.Operation) {
+	if s.ops == nil || op.Dataset == "" || op.Type == "" {
+		return
+	}
+	s.ops.Append(op)
+}
+
+func operationStatusFromDatasetDelete(result datasetimport.DeleteResult) string {
+	switch result.Status {
+	case "skipped":
+		return "planned"
+	case "failed":
+		return "failed"
+	default:
+		return "succeeded"
 	}
 }
 
