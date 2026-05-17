@@ -11,7 +11,7 @@ QUESTION="${QUESTION:-$DEFAULT_QUESTION}"
 TOP_K="${TOP_K:-20}"
 DATASET="${DATASET:-demo}"
 OUT_DIR="${OUT_DIR:-/tmp/fuzzy-searcher-go-demo-gates}"
-MODES="${MODES:-runtime-trace primitive-merge rerank-merge}"
+MODES="${MODES:-runtime-trace primitive-merge rerank-merge native-path1-rerank}"
 
 mkdir -p "$OUT_DIR"
 
@@ -72,6 +72,7 @@ expected = {
     "path2-detrace": "path2_detrace_merge",
     "primitive-merge": "path1_path2_primitive_merge",
     "rerank-merge": "path1_rerank_path2_primitive_merge",
+    "native-path1-rerank": "go_path1_rerank_path2_primitive_merge",
 }.get(mode)
 if not expected:
     sys.exit(0)

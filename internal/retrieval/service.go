@@ -271,6 +271,10 @@ func (s *Service) retrieveFromRerankPrimitiveMerge(ctx context.Context, req Retr
 			chunkContents = append(chunkContents, content)
 		}
 	}
+	strategyName := "path1_rerank_path2_primitive_merge"
+	if req.Path1Triples != nil && req.Path1Triples.SchemaVersion == "go-path1-candidates/v1" {
+		strategyName = "go_path1_rerank_path2_primitive_merge"
+	}
 	meta := map[string]any{
 		"rerank_schema_version": req.RerankTriples.SchemaVersion,
 		"path2_schema_version":  req.Path2Triples.SchemaVersion,
@@ -281,6 +285,9 @@ func (s *Service) retrieveFromRerankPrimitiveMerge(ctx context.Context, req Retr
 	if req.Path1Triples != nil {
 		meta["path1_raw_count"] = req.Path1Triples.RawOneHopTriplesCount
 		meta["path1_schema_version"] = req.Path1Triples.SchemaVersion
+		for k, v := range req.Path1Triples.Meta {
+			meta["path1_"+k] = v
+		}
 	}
 	for k, v := range sidecarMeta(s.sidecar != nil, req, sidecarErr) {
 		meta["chunk_"+k] = v
@@ -292,7 +299,7 @@ func (s *Service) retrieveFromRerankPrimitiveMerge(ctx context.Context, req Retr
 		ChunkRetrievalResults: chunkRetrievalResults,
 		Debug: RetrieveDebug{Strategies: []StrategyDebug{
 			{
-				Name:  "path1_rerank_path2_primitive_merge",
+				Name:  strategyName,
 				Count: len(triples),
 				Meta:  meta,
 			},
@@ -649,6 +656,303 @@ type triple struct {
 	Source   string
 	Relation string
 	Target   string
+}
+
+// BuildNativePath1Triples builds path1 raw candidates in Go, leaving only
+// embedding rerank scoring to the Python rerank-triples primitive.
+func (s *Service) BuildNativePath1Triples(ctx context.Context, req RetrieveRequest) (*Path1Triples, error) {
+	if s == nil || s.graph == nil {
+		return nil, fmt.Errorf("retriever service has no graph")
+	}
+	if s.sidecar == nil {
+		return nil, fmt.Errorf("native path1 candidates require --sidecar-url for node/relation FAISS")
+	}
+	topK := req.TopK
+	if topK <= 0 {
+		topK = 20
+	}
+
+	dataset := req.Dataset
+	if dataset == "" {
+		dataset = "demo"
+	}
+	embedResp, err := s.sidecar.Embed(ctx, sidecar.EmbedRequest{
+		Texts:     []string{req.Question},
+		Normalize: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("embed native path1 query: %w", err)
+	}
+	if len(embedResp.Vectors) == 0 {
+		return nil, fmt.Errorf("sidecar embed returned no vectors")
+	}
+	queryVector := embedResp.Vectors[0]
+
+	searchK := topK * 3
+	if searchK > 50 {
+		searchK = 50
+	}
+	nodeResp, err := s.sidecar.Search(ctx, sidecar.SearchRequest{
+		Dataset:     dataset,
+		Index:       "node",
+		QueryVector: queryVector,
+		TopK:        searchK,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search native path1 nodes: %w", err)
+	}
+	relationResp, err := s.sidecar.Search(ctx, sidecar.SearchRequest{
+		Dataset:     dataset,
+		Index:       "relation",
+		QueryVector: queryVector,
+		TopK:        topK,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search native path1 relations: %w", err)
+	}
+
+	topNodes := s.nativePath1TopNodes(req.Question, nodeResp.Hits, topK)
+	topRelations := nativePath1TopRelations(relationResp.Hits)
+	keywords := queryTerms(req.Question)
+	rawTriples := s.nativePath1RawTriples(topNodes, topRelations, keywords)
+
+	traceTriples := make([]TraceTriple, 0, len(rawTriples))
+	for i, tr := range rawTriples {
+		traceTriples = append(traceTriples, TraceTriple{
+			Rank:     i + 1,
+			Source:   "go_path1_raw",
+			Key:      traceTripleKey(tr.Source, tr.Relation, tr.Target),
+			HeadID:   tr.Source,
+			Relation: tr.Relation,
+			TailID:   tr.Target,
+			ChunkIDs: s.chunkIDsFromNodeIDs(tr.Source, tr.Target),
+		})
+	}
+
+	return &Path1Triples{
+		SchemaVersion: "go-path1-candidates/v1",
+		Dataset:       dataset,
+		Question:      req.Question,
+		TopK:          topK,
+		Meta: map[string]any{
+			"top_nodes_count":     len(topNodes),
+			"top_relations_count": len(topRelations),
+			"keyword_count":       len(keywords),
+			"node_search_k":       searchK,
+		},
+		RawOneHopTriplesCount: len(traceTriples),
+		RawOneHopTriples:      traceTriples,
+	}, nil
+}
+
+func (s *Service) nativePath1TopNodes(question string, nodeHits []sidecar.SearchHit, topK int) []string {
+	seen := map[string]struct{}{}
+	topNodes := make([]string, 0, topK)
+	for _, hit := range nodeHits {
+		if hit.ID == "" || hit.Score <= 0.05 {
+			continue
+		}
+		if _, ok := s.graph.Nodes[hit.ID]; !ok {
+			continue
+		}
+		if _, ok := seen[hit.ID]; ok {
+			continue
+		}
+		seen[hit.ID] = struct{}{}
+		topNodes = append(topNodes, hit.ID)
+		if len(topNodes) >= topK {
+			break
+		}
+	}
+	for _, id := range s.keywordNodes(question) {
+		if len(topNodes) >= topK {
+			break
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		topNodes = append(topNodes, id)
+	}
+	return topNodes
+}
+
+func nativePath1TopRelations(hits []sidecar.SearchHit) []string {
+	relations := make([]string, 0, len(hits))
+	seen := map[string]struct{}{}
+	for _, hit := range hits {
+		relation := hit.ID
+		if relation == "" {
+			relation = hit.Relation
+		}
+		relation = strings.TrimSpace(relation)
+		if relation == "" {
+			continue
+		}
+		if _, ok := seen[relation]; ok {
+			continue
+		}
+		seen[relation] = struct{}{}
+		relations = append(relations, relation)
+	}
+	return relations
+}
+
+func (s *Service) nativePath1RawTriples(topNodes []string, topRelations []string, keywords []string) []triple {
+	combined := make([]triple, 0)
+	combined = append(combined, s.optimizedNeighborExpansion(topNodes)...)
+	combined = append(combined, s.pathBasedTriples(topNodes, keywords, 2)...)
+	combined = append(combined, s.relationMatchedTriples(topNodes, topRelations)...)
+	return dedupeTriples(combined)
+}
+
+func (s *Service) optimizedNeighborExpansion(topNodes []string) []triple {
+	outgoing := make(map[string][]string)
+	edgeByPair := make(map[string]triple)
+	for _, edge := range s.graph.Edges {
+		outgoing[edge.Source] = append(outgoing[edge.Source], edge.Target)
+		key := edge.Source + "\x00" + edge.Target
+		if _, ok := edgeByPair[key]; !ok {
+			edgeByPair[key] = triple{Source: edge.Source, Relation: edge.Relation, Target: edge.Target}
+		}
+	}
+
+	allNeighbors := map[string]struct{}{}
+	pairs := map[string][2]string{}
+	for _, node := range topNodes {
+		for _, neighbor := range outgoing[node] {
+			allNeighbors[neighbor] = struct{}{}
+		}
+		for neighbor := range allNeighbors {
+			pairs[node+"\x00"+neighbor] = [2]string{node, neighbor}
+			pairs[neighbor+"\x00"+node] = [2]string{neighbor, node}
+		}
+	}
+
+	keys := make([]string, 0, len(pairs))
+	for key := range pairs {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	triples := make([]triple, 0, len(keys))
+	for _, key := range keys {
+		pair := pairs[key]
+		if tr, ok := edgeByPair[pair[0]+"\x00"+pair[1]]; ok && tr.Relation != "" {
+			triples = append(triples, tr)
+		}
+	}
+	return triples
+}
+
+func (s *Service) pathBasedTriples(startNodes []string, keywords []string, maxDepth int) []triple {
+	if len(startNodes) == 0 || len(keywords) == 0 {
+		return nil
+	}
+	outgoing := make(map[string][]string)
+	edgeByPair := make(map[string]triple)
+	for _, edge := range s.graph.Edges {
+		outgoing[edge.Source] = append(outgoing[edge.Source], edge.Target)
+		key := edge.Source + "\x00" + edge.Target
+		if _, ok := edgeByPair[key]; !ok {
+			edgeByPair[key] = triple{Source: edge.Source, Relation: edge.Relation, Target: edge.Target}
+		}
+	}
+	for node := range outgoing {
+		sort.Strings(outgoing[node])
+	}
+
+	var found []triple
+	visited := map[string]struct{}{}
+	var dfs func(node string, depth int, path []string)
+	dfs = func(node string, depth int, path []string) {
+		if depth > maxDepth {
+			return
+		}
+		if _, ok := visited[node]; ok {
+			return
+		}
+		visited[node] = struct{}{}
+
+		nodeText := strings.ToLower(nodeTextForTriple(s.graph.Nodes[node]))
+		for _, keyword := range keywords {
+			if keyword != "" && strings.Contains(nodeText, keyword) {
+				for i := 0; i < len(path)-1; i++ {
+					if tr, ok := edgeByPair[path[i]+"\x00"+path[i+1]]; ok && tr.Relation != "" {
+						found = append(found, tr)
+					}
+				}
+				break
+			}
+		}
+		if depth >= maxDepth {
+			return
+		}
+		for _, neighbor := range outgoing[node] {
+			if _, ok := visited[neighbor]; !ok {
+				dfs(neighbor, depth+1, append(path, neighbor))
+			}
+		}
+	}
+
+	for _, start := range startNodes {
+		dfs(start, 0, []string{start})
+	}
+	return found
+}
+
+func (s *Service) relationMatchedTriples(topNodes []string, relations []string) []triple {
+	if len(topNodes) == 0 || len(relations) == 0 {
+		return nil
+	}
+	nodeSet := make(map[string]struct{}, len(topNodes))
+	for _, node := range topNodes {
+		nodeSet[node] = struct{}{}
+	}
+	relationSet := make(map[string]struct{}, len(relations))
+	for _, relation := range relations {
+		relationSet[relation] = struct{}{}
+	}
+
+	triples := make([]triple, 0)
+	for _, edge := range s.graph.Edges {
+		if _, ok := relationSet[edge.Relation]; !ok {
+			continue
+		}
+		if _, sourceOK := nodeSet[edge.Source]; !sourceOK {
+			if _, targetOK := nodeSet[edge.Target]; !targetOK {
+				continue
+			}
+		}
+		triples = append(triples, triple{Source: edge.Source, Relation: edge.Relation, Target: edge.Target})
+	}
+	return triples
+}
+
+func dedupeTriples(in []triple) []triple {
+	seen := map[string]struct{}{}
+	out := make([]triple, 0, len(in))
+	for _, tr := range in {
+		key := traceTripleKey(tr.Source, tr.Relation, tr.Target)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, tr)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Source != out[j].Source {
+			return out[i].Source < out[j].Source
+		}
+		if out[i].Relation != out[j].Relation {
+			return out[i].Relation < out[j].Relation
+		}
+		return out[i].Target < out[j].Target
+	})
+	return out
+}
+
+func traceTripleKey(head, relation, tail string) string {
+	return head + "\t" + relation + "\t" + tail
 }
 
 func (s *Service) oneHopTriples(nodeIDs []string) []triple {

@@ -26,12 +26,13 @@ func main() {
 	datasetName := flag.String("dataset", "demo", "Dataset name for sidecar requests")
 	involvedTypesPath := flag.String("involved-types", "", "Optional involved_types JSON file")
 	sidecarURL := flag.String("sidecar-url", "", "Optional Python sidecar base URL")
-	mode := flag.String("mode", "", "Retrieval mode: native, sidecar, runtime-trace, path2-detrace, primitive-merge, rerank-merge")
+	mode := flag.String("mode", "", "Retrieval mode: native, sidecar, runtime-trace, path2-detrace, primitive-merge, rerank-merge, native-path1-rerank")
 	tripleTracePath := flag.String("triple-trace", "", "Optional Python triple-trace/v1 JSON path")
 	sidecarTripleTrace := flag.Bool("sidecar-triple-trace", false, "Fetch Python triple-trace/v1 from --sidecar-url")
 	sidecarPath1Triples := flag.Bool("sidecar-path1-triples", false, "Fetch Python path1-triples/v1 from --sidecar-url and merge locally")
 	sidecarPath2Triples := flag.Bool("sidecar-path2-triples", false, "Fetch Python path2-triples/v1 from --sidecar-url and merge locally")
 	sidecarRerankTriples := flag.Bool("sidecar-rerank-triples", false, "Rerank path1 raw triples through Python rerank-triples/v1 before merging")
+	nativePath1Triples := flag.Bool("native-path1-triples", false, "Build path1 raw triples in Go before reranking through Python")
 	path2Threshold := flag.Float64("path2-threshold", 0.1, "Threshold for --sidecar-path2-triples")
 	pretty := flag.Bool("pretty", true, "Pretty-print JSON output")
 	flag.CommandLine.Parse(args)
@@ -40,7 +41,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "required flags: --graph, --chunks, --question")
 		os.Exit(2)
 	}
-	if err := applyMode(*mode, sidecarTripleTrace, sidecarPath1Triples, sidecarPath2Triples, sidecarRerankTriples); err != nil {
+	if err := applyMode(*mode, sidecarTripleTrace, sidecarPath1Triples, sidecarPath2Triples, sidecarRerankTriples, nativePath1Triples); err != nil {
 		fatal(err)
 	}
 
@@ -68,6 +69,11 @@ func main() {
 	if *sidecarURL != "" {
 		client = sidecar.NewClient(*sidecarURL)
 	}
+	opts := []retrieval.Option{}
+	if client != nil {
+		opts = append(opts, retrieval.WithSidecar(client))
+	}
+	service := retrieval.NewService(graph, chunkStore, opts...)
 	if *tripleTracePath != "" {
 		req.TripleTrace, err = loadTripleTrace(*tripleTracePath)
 		if err != nil {
@@ -87,8 +93,8 @@ func main() {
 		if client == nil {
 			fatal(fmt.Errorf("--sidecar-path2-triples requires --sidecar-url"))
 		}
-		if req.TripleTrace == nil && !*sidecarPath1Triples {
-			fatal(fmt.Errorf("--sidecar-path2-triples requires --sidecar-path1-triples, --sidecar-triple-trace, or --triple-trace for path1 authority"))
+		if req.TripleTrace == nil && !*sidecarPath1Triples && !*nativePath1Triples {
+			fatal(fmt.Errorf("--sidecar-path2-triples requires --sidecar-path1-triples, --native-path1-triples, --sidecar-triple-trace, or --triple-trace for path1 authority"))
 		}
 		req.Path2Triples, err = fetchPath2Triples(context.Background(), client, req, *path2Threshold)
 		if err != nil {
@@ -104,12 +110,21 @@ func main() {
 			fatal(err)
 		}
 	}
+	if *nativePath1Triples {
+		if client == nil {
+			fatal(fmt.Errorf("--native-path1-triples requires --sidecar-url"))
+		}
+		req.Path1Triples, err = service.BuildNativePath1Triples(context.Background(), req)
+		if err != nil {
+			fatal(err)
+		}
+	}
 	if *sidecarRerankTriples {
 		if client == nil {
 			fatal(fmt.Errorf("--sidecar-rerank-triples requires --sidecar-url"))
 		}
-		if req.Path1Triples == nil || !*sidecarPath1Triples {
-			fatal(fmt.Errorf("--sidecar-rerank-triples requires --sidecar-path1-triples"))
+		if req.Path1Triples == nil || (!*sidecarPath1Triples && !*nativePath1Triples) {
+			fatal(fmt.Errorf("--sidecar-rerank-triples requires --sidecar-path1-triples or --native-path1-triples"))
 		}
 		if req.Path2Triples == nil || !*sidecarPath2Triples {
 			fatal(fmt.Errorf("--sidecar-rerank-triples requires --sidecar-path2-triples"))
@@ -120,12 +135,7 @@ func main() {
 		}
 	}
 
-	opts := []retrieval.Option{}
-	if client != nil {
-		opts = append(opts, retrieval.WithSidecar(client))
-	}
-
-	result, err := retrieval.NewService(graph, chunkStore, opts...).Retrieve(context.Background(), req)
+	result, err := service.Retrieve(context.Background(), req)
 	if err != nil {
 		fatal(err)
 	}
@@ -142,7 +152,7 @@ func main() {
 	fmt.Println(string(out))
 }
 
-func applyMode(mode string, sidecarTripleTrace *bool, sidecarPath1Triples *bool, sidecarPath2Triples *bool, sidecarRerankTriples *bool) error {
+func applyMode(mode string, sidecarTripleTrace *bool, sidecarPath1Triples *bool, sidecarPath2Triples *bool, sidecarRerankTriples *bool, nativePath1Triples *bool) error {
 	switch mode {
 	case "":
 		return nil
@@ -158,6 +168,10 @@ func applyMode(mode string, sidecarTripleTrace *bool, sidecarPath1Triples *bool,
 		*sidecarPath2Triples = true
 	case "rerank-merge":
 		*sidecarPath1Triples = true
+		*sidecarRerankTriples = true
+		*sidecarPath2Triples = true
+	case "native-path1-rerank":
+		*nativePath1Triples = true
 		*sidecarRerankTriples = true
 		*sidecarPath2Triples = true
 	default:

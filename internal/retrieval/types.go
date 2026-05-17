@@ -82,13 +82,14 @@ type Path2Triples struct {
 
 // Path1Triples is the Python-authoritative path1 primitive emitted by Phase 7A.
 type Path1Triples struct {
-	SchemaVersion         string        `json:"schema_version"`
-	Dataset               string        `json:"dataset"`
-	Question              string        `json:"question"`
-	TopK                  int           `json:"top_k"`
-	RawOneHopTriplesCount int           `json:"raw_one_hop_triples_count,omitempty"`
-	RawOneHopTriples      []TraceTriple `json:"raw_one_hop_triples,omitempty"`
-	RerankedTriples       []TraceTriple `json:"reranked_triples"`
+	SchemaVersion         string         `json:"schema_version"`
+	Dataset               string         `json:"dataset"`
+	Question              string         `json:"question"`
+	TopK                  int            `json:"top_k"`
+	Meta                  map[string]any `json:"meta,omitempty"`
+	RawOneHopTriplesCount int            `json:"raw_one_hop_triples_count,omitempty"`
+	RawOneHopTriples      []TraceTriple  `json:"raw_one_hop_triples,omitempty"`
+	RerankedTriples       []TraceTriple  `json:"reranked_triples"`
 }
 
 // RerankTriples is the Python-authoritative rerank-only primitive emitted by Phase 8A.

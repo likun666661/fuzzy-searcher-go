@@ -487,3 +487,92 @@ func TestRetrieveWithRerankPrimitiveMerge(t *testing.T) {
 		t.Fatalf("debug strategies = %#v", result.Debug.Strategies)
 	}
 }
+
+func TestBuildNativePath1Triples(t *testing.T) {
+	graph := &dataset.Graph{
+		Nodes: map[string]*dataset.Node{
+			"n1": {
+				ID:    "n1",
+				Label: "entity",
+				Properties: map[string]any{
+					"name":     "Lionel Messi",
+					"chunk id": "c1",
+				},
+			},
+			"n2": {
+				ID:    "n2",
+				Label: "entity",
+				Properties: map[string]any{
+					"name":     "FC Barcelona",
+					"chunk id": "c2",
+				},
+			},
+		},
+		Edges: []dataset.Edge{{Source: "n1", Target: "n2", Relation: "played_for"}},
+	}
+	chunkStore := &chunks.Store{ByID: map[string]string{
+		"c1": "Messi source chunk",
+		"c2": "Barcelona source chunk",
+	}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/embed":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"model":     "test-model",
+				"dimension": 3,
+				"vectors":   [][]float32{{0.1, 0.2, 0.3}},
+			})
+		case "/v1/faiss/search":
+			var req struct {
+				Index string `json:"index"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode search request: %v", err)
+			}
+			hits := []map[string]any{}
+			switch req.Index {
+			case "node":
+				hits = []map[string]any{
+					{"id": "n1", "score": 0.9, "rank": 1},
+					{"id": "n2", "score": 0.8, "rank": 2},
+				}
+			case "relation":
+				hits = []map[string]any{{"id": "played_for", "score": 0.7, "rank": 1}}
+			default:
+				t.Fatalf("unexpected search index %q", req.Index)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"dataset": "demo",
+				"index":   req.Index,
+				"hits":    hits,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	service := retrieval.NewService(
+		graph,
+		chunkStore,
+		retrieval.WithSidecar(sidecar.NewClient(server.URL)),
+	)
+	path1, err := service.BuildNativePath1Triples(context.Background(), retrieval.RetrieveRequest{
+		Dataset:  "demo",
+		Question: "Messi Barcelona",
+		TopK:     20,
+	})
+	if err != nil {
+		t.Fatalf("BuildNativePath1Triples: %v", err)
+	}
+	if path1.SchemaVersion != "go-path1-candidates/v1" {
+		t.Fatalf("schema = %q", path1.SchemaVersion)
+	}
+	if len(path1.RawOneHopTriples) != 1 || path1.RawOneHopTriples[0].Key != "n1\tplayed_for\tn2" {
+		t.Fatalf("raw triples = %#v", path1.RawOneHopTriples)
+	}
+	if got := path1.RawOneHopTriples[0].ChunkIDs; len(got) != 2 || got[0] != "c1" || got[1] != "c2" {
+		t.Fatalf("chunk ids = %#v", got)
+	}
+}

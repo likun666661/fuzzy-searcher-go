@@ -182,15 +182,17 @@ the report fail only on regressions in already-green gates; add
 
 ## Current Engineering Gate
 
-The current preferred mode is `rerank-merge`. It should be checked alongside
-two regression modes:
+The current migration mode is `native-path1-rerank`. It should be checked
+alongside three regression modes:
 
 - `runtime-trace`: full Python authority baseline.
 - `primitive-merge`: Phase 7 path1/path2 primitive regression gate.
-- `rerank-merge`: current main path, where Go sends path1 raw candidates to
+- `rerank-merge`: Phase 8 path, where Go sends Python-provided raw candidates to
   rerank-only sidecar scoring and merges locally with path2.
+- `native-path1-rerank`: Phase 9 path, where Go generates path1 raw candidates
+  before rerank-only sidecar scoring.
 
-Run all three demo gates with:
+Run all demo gates with:
 
 ```bash
 SIDECAR_URL=http://127.0.0.1:8765 scripts/run_demo_gates.sh
@@ -202,6 +204,7 @@ checks that the expected debug strategy is present:
 - `runtime-trace`: `python_triple_trace`
 - `primitive-merge`: `path1_path2_primitive_merge`
 - `rerank-merge`: `path1_rerank_path2_primitive_merge`
+- `native-path1-rerank`: `go_path1_rerank_path2_primitive_merge`
 
 Contract details live in `docs/contracts/sidecar_primitives.md` and
 `docs/contracts/retrieve_result.schema.json`.
