@@ -852,6 +852,61 @@ print("ok but did not write graph or chunks")
 	}
 }
 
+func TestBuildGraphJobWorkerFailureMarksArtifactsFailed(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import sys
+print("graph runtime failed", file=sys.stderr)
+raise SystemExit(8)
+`)
+
+	service := svc.NewService(config.Config{
+		DefaultDataset:   "demo",
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		PythonBin:        "python3",
+		BuildGraphScript: scriptPath,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	})
+	routes := service.Routes()
+
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", bytes.NewBufferString(`{"type":"build_graph","build_graph":{"dataset":"demo"}}`)))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create job status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "failed")
+	if errorText, _ := job["error"].(string); !strings.Contains(errorText, "graph runtime failed") {
+		t.Fatalf("job error = %#v", job["error"])
+	}
+	if !containsArtifactStatus(job, "graph", "failed") || !containsArtifactStatus(job, "chunks", "failed") {
+		t.Fatalf("job artifacts not failed: %#v", job["artifacts"])
+	}
+
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK {
+		t.Fatalf("events status = %d, body = %s", events.Code, events.Body.String())
+	}
+	if !strings.Contains(events.Body.String(), `"worker_started"`) ||
+		!strings.Contains(events.Body.String(), `"failed"`) ||
+		!strings.Contains(events.Body.String(), "graph runtime failed") {
+		t.Fatalf("events body = %s", events.Body.String())
+	}
+}
+
 func quote(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }

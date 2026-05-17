@@ -106,6 +106,38 @@ print("ok but no files")
 	}
 }
 
+func TestRunRejectsInvalidGraphJSON(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "worker.py")
+	graphPath := filepath.Join(dir, "graph.json")
+	chunksPath := filepath.Join(dir, "chunks.txt")
+	writeExecutable(t, script, `#!/usr/bin/env python3
+import os
+import sys
+graph = sys.argv[sys.argv.index("--graph-output") + 1]
+chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
+os.makedirs(os.path.dirname(graph) or ".", exist_ok=True)
+os.makedirs(os.path.dirname(chunks) or ".", exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    f.write("{not-json")
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: c1\tChunk: hello\n")
+`)
+
+	_, err := buildgraph.Run(context.Background(), buildgraph.Config{
+		PythonBin:  "python3",
+		ScriptPath: script,
+	}, jobs.BuildGraphSpec{
+		Dataset:          "demo",
+		CorpusPath:       filepath.Join(dir, "corpus.json"),
+		GraphOutputPath:  graphPath,
+		ChunksOutputPath: chunksPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "parse graph output") {
+		t.Fatalf("invalid graph err = %v", err)
+	}
+}
+
 func writeExecutable(t *testing.T, path string, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
