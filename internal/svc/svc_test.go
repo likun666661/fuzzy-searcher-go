@@ -140,6 +140,11 @@ func TestDatasetSchemaManagementEndpoint(t *testing.T) {
 		!strings.Contains(fallback.Body.String(), `"fallback":true`) {
 		t.Fatalf("fallback schema status = %d, body = %s", fallback.Code, fallback.Body.String())
 	}
+	noFallback := httptest.NewRecorder()
+	routes.ServeHTTP(noFallback, httptest.NewRequest(http.MethodGet, "/v1/datasets/news/schema?allow_fallback=false", nil))
+	if noFallback.Code != http.StatusNotFound || !strings.Contains(noFallback.Body.String(), `"code":"schema_not_found"`) {
+		t.Fatalf("no-fallback schema status = %d, body = %s", noFallback.Code, noFallback.Body.String())
+	}
 
 	put := httptest.NewRecorder()
 	body := bytes.NewBufferString(`{"schema":{"Nodes":["organization"],"Relations":["located_in"],"Attributes":["name"]},"source_path":"/tmp/schema.json"}`)
@@ -159,6 +164,12 @@ func TestDatasetSchemaManagementEndpoint(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "output", "datasets", "news.schema.json")); err != nil {
 		t.Fatalf("schema metadata not written: %v", err)
 	}
+	var original struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.Unmarshal(put.Body.Bytes(), &original); err != nil {
+		t.Fatalf("decode put schema: %v", err)
+	}
 
 	got := httptest.NewRecorder()
 	routes.ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/v1/datasets/news/schema", nil))
@@ -168,11 +179,34 @@ func TestDatasetSchemaManagementEndpoint(t *testing.T) {
 		!strings.Contains(got.Body.String(), managedPath) {
 		t.Fatalf("get schema status = %d, body = %s", got.Code, got.Body.String())
 	}
+	metadataOnly := httptest.NewRecorder()
+	routes.ServeHTTP(metadataOnly, httptest.NewRequest(http.MethodGet, "/v1/datasets/news/schema?include_body=false", nil))
+	if metadataOnly.Code != http.StatusOK ||
+		strings.Contains(metadataOnly.Body.String(), `"schema":`) ||
+		!strings.Contains(metadataOnly.Body.String(), `"hash"`) {
+		t.Fatalf("metadata-only schema status = %d, body = %s", metadataOnly.Code, metadataOnly.Body.String())
+	}
 
 	conflict := httptest.NewRecorder()
 	routes.ServeHTTP(conflict, httptest.NewRequest(http.MethodPut, "/v1/datasets/news/schema", bytes.NewBufferString(`{"schema":{"Nodes":["event"],"Relations":["related_to"],"Attributes":["name"]}}`)))
 	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), `"code":"schema_exists"`) {
 		t.Fatalf("conflict status = %d, body = %s", conflict.Code, conflict.Body.String())
+	}
+	overwrite := httptest.NewRecorder()
+	routes.ServeHTTP(overwrite, httptest.NewRequest(http.MethodPut, "/v1/datasets/news/schema", bytes.NewBufferString(`{"overwrite":true,"schema":{"Nodes":["event"],"Relations":["related_to"],"Attributes":["title"]}}`)))
+	if overwrite.Code != http.StatusOK ||
+		!strings.Contains(overwrite.Body.String(), `"version":2`) ||
+		!strings.Contains(overwrite.Body.String(), `"nodes":1`) {
+		t.Fatalf("overwrite status = %d, body = %s", overwrite.Code, overwrite.Body.String())
+	}
+	var overwritten struct {
+		Hash string `json:"hash"`
+	}
+	if err := json.Unmarshal(overwrite.Body.Bytes(), &overwritten); err != nil {
+		t.Fatalf("decode overwrite: %v", err)
+	}
+	if overwritten.Hash == "" || overwritten.Hash == original.Hash {
+		t.Fatalf("overwrite hash = %q, original = %q", overwritten.Hash, original.Hash)
 	}
 
 	validate := httptest.NewRecorder()
@@ -189,15 +223,6 @@ func TestDatasetSchemaManagementEndpoint(t *testing.T) {
 		t.Fatalf("list schemas status = %d, body = %s", list.Code, list.Body.String())
 	}
 
-	ops := httptest.NewRecorder()
-	routes.ServeHTTP(ops, httptest.NewRequest(http.MethodGet, "/v1/datasets/news/operations", nil))
-	if ops.Code != http.StatusOK ||
-		!strings.Contains(ops.Body.String(), `"type":"schema_update"`) ||
-		!strings.Contains(ops.Body.String(), `"status":"succeeded"`) ||
-		!strings.Contains(ops.Body.String(), `"name":"schema_metadata"`) {
-		t.Fatalf("schema operation status = %d, body = %s", ops.Code, ops.Body.String())
-	}
-
 	bad := httptest.NewRecorder()
 	routes.ServeHTTP(bad, httptest.NewRequest(http.MethodPut, "/v1/datasets/bad/schema", bytes.NewBufferString(`{"schema":{"Nodes":"person"}}`)))
 	if bad.Code != http.StatusBadRequest || !strings.Contains(bad.Body.String(), `"code":"invalid_schema"`) {
@@ -206,11 +231,33 @@ func TestDatasetSchemaManagementEndpoint(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "schemas", "bad.json")); !os.IsNotExist(err) {
 		t.Fatalf("bad schema should not be written, stat err = %v", err)
 	}
+	badOverwrite := httptest.NewRecorder()
+	routes.ServeHTTP(badOverwrite, httptest.NewRequest(http.MethodPut, "/v1/datasets/news/schema", bytes.NewBufferString(`{"overwrite":true,"schema":{"Nodes":["bad"],"Relations":[],"Attributes":["name"]}}`)))
+	if badOverwrite.Code != http.StatusBadRequest || !strings.Contains(badOverwrite.Body.String(), `"code":"invalid_schema"`) {
+		t.Fatalf("bad overwrite status = %d, body = %s", badOverwrite.Code, badOverwrite.Body.String())
+	}
+	afterBadBody, err := os.ReadFile(managedPath)
+	if err != nil {
+		t.Fatalf("read schema after bad overwrite: %v", err)
+	}
+	if !strings.Contains(string(afterBadBody), `"event"`) || strings.Contains(string(afterBadBody), `"bad"`) {
+		t.Fatalf("bad overwrite changed schema unexpectedly: %s", string(afterBadBody))
+	}
 
 	duplicate := httptest.NewRecorder()
 	routes.ServeHTTP(duplicate, httptest.NewRequest(http.MethodPost, "/v1/schemas/validate", bytes.NewBufferString(`{"schema":{"Nodes":["person","person"],"Relations":["knows"],"Attributes":["name"]}}`)))
 	if duplicate.Code != http.StatusBadRequest || !strings.Contains(duplicate.Body.String(), `"code":"duplicate_schema_item"`) {
 		t.Fatalf("duplicate status = %d, body = %s", duplicate.Code, duplicate.Body.String())
+	}
+
+	ops := httptest.NewRecorder()
+	routes.ServeHTTP(ops, httptest.NewRequest(http.MethodGet, "/v1/datasets/news/operations", nil))
+	if ops.Code != http.StatusOK ||
+		!strings.Contains(ops.Body.String(), `"type":"schema_update"`) ||
+		!strings.Contains(ops.Body.String(), `"status":"succeeded"`) ||
+		!strings.Contains(ops.Body.String(), `"status":"failed"`) ||
+		!strings.Contains(ops.Body.String(), `"name":"schema_metadata"`) {
+		t.Fatalf("schema operation status = %d, body = %s", ops.Code, ops.Body.String())
 	}
 
 	invalidDataset := httptest.NewRecorder()
@@ -225,10 +272,12 @@ func TestDatasetImportEndpoint(t *testing.T) {
 	sourceCorpus := filepath.Join(root, "incoming", "corpus.json")
 	sourceSchema := filepath.Join(root, "incoming", "schema.json")
 	badSchema := filepath.Join(root, "incoming", "bad_schema.json")
+	badShapeSchema := filepath.Join(root, "incoming", "bad_shape_schema.json")
 	buildScript := filepath.Join(root, "workers", "build_graph.py")
 	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
-	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	mustWrite(t, badSchema, `{"entities":`)
+	mustWrite(t, badShapeSchema, `{"Nodes":["person"],"Relations":[],"Attributes":["name"]}`)
 	mustMkdir(t, filepath.Dir(buildScript))
 	writeExecutable(t, buildScript, `#!/usr/bin/env python3
 import json
@@ -287,6 +336,7 @@ with open(chunks, "w", encoding="utf-8") as f:
 		`"status":"imported"`,
 		`"name":"corpus"`,
 		`"name":"schema"`,
+		`"name":"schema_metadata"`,
 		`"name":"metadata"`,
 	} {
 		if !strings.Contains(created.Body.String(), want) {
@@ -296,6 +346,7 @@ with open(chunks, "w", encoding="utf-8") as f:
 	for _, path := range []string{
 		filepath.Join(root, "data", "uploaded", "imported", "corpus.json"),
 		filepath.Join(root, "schemas", "imported.json"),
+		filepath.Join(root, "output", "datasets", "imported.schema.json"),
 		filepath.Join(root, "output", "datasets", "imported.json"),
 	} {
 		if _, err := os.Stat(path); err != nil {
@@ -361,6 +412,21 @@ with open(chunks, "w", encoding="utf-8") as f:
 	if _, err := os.Stat(filepath.Join(root, "output", "datasets", "badjson.json")); !os.IsNotExist(err) {
 		t.Fatalf("bad schema import should not persist metadata, stat err = %v", err)
 	}
+	badShape := httptest.NewRecorder()
+	routes.ServeHTTP(badShape, httptest.NewRequest(http.MethodPost, "/v1/datasets/import", bytes.NewBufferString(`{"dataset":"badshape","corpus_path":`+quote(sourceCorpus)+`,"schema_path":`+quote(badShapeSchema)+`}`)))
+	if badShape.Code != http.StatusBadRequest || !strings.Contains(badShape.Body.String(), "dataset_import_failed") || !strings.Contains(badShape.Body.String(), "Relations must be a non-empty array") {
+		t.Fatalf("bad shape schema import status = %d, body = %s", badShape.Code, badShape.Body.String())
+	}
+	for _, path := range []string{
+		filepath.Join(root, "data", "uploaded", "badshape", "corpus.json"),
+		filepath.Join(root, "schemas", "badshape.json"),
+		filepath.Join(root, "output", "datasets", "badshape.schema.json"),
+		filepath.Join(root, "output", "datasets", "badshape.json"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("bad shape import should not persist %s, stat err = %v", path, err)
+		}
+	}
 }
 
 func TestDatasetDeleteEndpoint(t *testing.T) {
@@ -368,7 +434,7 @@ func TestDatasetDeleteEndpoint(t *testing.T) {
 	sourceCorpus := filepath.Join(root, "incoming", "corpus.json")
 	sourceSchema := filepath.Join(root, "incoming", "schema.json")
 	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
-	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	cfg := config.Config{
 		ArtifactRoot:    root,
 		DefaultDataset:  "demo",
@@ -512,7 +578,7 @@ func TestDatasetRebuildEndpoint(t *testing.T) {
 	sourceSchema := filepath.Join(root, "incoming", "schema.json")
 	buildScript := filepath.Join(root, "workers", "build_graph.py")
 	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
-	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	mustMkdir(t, filepath.Dir(buildScript))
 	writeExecutable(t, buildScript, `#!/usr/bin/env python3
 import json
@@ -672,7 +738,7 @@ func TestDatasetOperationHistoryEndpoints(t *testing.T) {
 	parseScript := filepath.Join(root, "workers", "parse.py")
 	buildScript := filepath.Join(root, "workers", "build.py")
 	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
-	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	mustWrite(t, document, "hello")
 	mustMkdir(t, filepath.Dir(parseScript))
 	writeExecutable(t, parseScript, `#!/usr/bin/env python3
@@ -2148,7 +2214,7 @@ func TestCreateDatasetWorkflowLifecycle(t *testing.T) {
 	document := filepath.Join(dir, "incoming", "doc.txt")
 	schemaPath := filepath.Join(dir, "incoming", "schema.json")
 	mustWrite(t, document, "hello dataset")
-	mustWrite(t, schemaPath, `{"entities":[]}`)
+	mustWrite(t, schemaPath, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	writeExecutable(t, parseScript, `#!/usr/bin/env python3
 import json
 import os
@@ -2274,7 +2340,7 @@ func TestCreateDatasetWorkflowParseFailureStopsImportAndBuild(t *testing.T) {
 	schemaPath := filepath.Join(dir, "incoming", "schema.json")
 	buildMarker := filepath.Join(dir, "build-called")
 	mustWrite(t, document, "hello dataset")
-	mustWrite(t, schemaPath, `{"entities":[]}`)
+	mustWrite(t, schemaPath, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	writeExecutable(t, parseScript, `#!/usr/bin/env python3
 import sys
 print("parse exploded", file=sys.stderr)
@@ -2367,7 +2433,7 @@ func TestCreateDatasetWorkflowBuildFailurePreservesImportedArtifacts(t *testing.
 	document := filepath.Join(dir, "incoming", "doc.txt")
 	schemaPath := filepath.Join(dir, "incoming", "schema.json")
 	mustWrite(t, document, "hello dataset")
-	mustWrite(t, schemaPath, `{"entities":[]}`)
+	mustWrite(t, schemaPath, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	writeCreateDatasetParseWorker(t, parseScript)
 	writeExecutable(t, buildScript, `#!/usr/bin/env python3
 import sys
@@ -2421,7 +2487,7 @@ func TestCreateDatasetWorkflowCancelPropagatesToParseJob(t *testing.T) {
 	schemaPath := filepath.Join(dir, "incoming", "schema.json")
 	buildMarker := filepath.Join(dir, "build-called")
 	mustWrite(t, document, "hello dataset")
-	mustWrite(t, schemaPath, `{"entities":[]}`)
+	mustWrite(t, schemaPath, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	writeExecutable(t, parseScript, `#!/usr/bin/env python3
 import time
 time.sleep(10)

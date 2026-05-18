@@ -13,6 +13,7 @@ import (
 
 	"github.com/fuzzy-searcher-go/internal/config"
 	"github.com/fuzzy-searcher-go/internal/jobs"
+	"github.com/fuzzy-searcher-go/internal/schemas"
 )
 
 const SchemaVersion = "dataset-import/v1"
@@ -148,23 +149,52 @@ func Import(cfg config.Config, req Request) (Metadata, error) {
 	if err := validateJSONFile(req.CorpusPath, "corpus"); err != nil {
 		return Metadata{}, err
 	}
-	if err := validateJSONFile(req.SchemaPath, "schema"); err != nil {
+	schemaBody, err := validateSchemaFile(req.SchemaPath)
+	if err != nil {
 		return Metadata{}, err
 	}
 
 	paths := managedPaths(cfg, req.Dataset)
 	if !req.Overwrite {
-		if existing := firstExisting(paths.corpus, paths.schema, paths.metadata); existing != "" {
+		if existing := firstExisting(paths.corpus, paths.schema, paths.schemaMetadata, paths.metadata); existing != "" {
 			return Metadata{}, fmt.Errorf("%w: %s", ErrAlreadyExists, existing)
 		}
 	}
 	if err := copyFile(req.CorpusPath, paths.corpus); err != nil {
 		return Metadata{}, err
 	}
-	if err := copyFile(req.SchemaPath, paths.schema); err != nil {
+	schemaUpdate, err := schemas.Put(cfg, schemas.PutRequest{
+		Dataset:    req.Dataset,
+		Schema:     schemaBody,
+		Overwrite:  req.Overwrite,
+		SourcePath: req.SchemaPath,
+	})
+	if err != nil {
 		return Metadata{}, err
 	}
 	now := time.Now().UTC()
+	artifacts := []jobs.Artifact{
+		{
+			Name:        "corpus",
+			Role:        "input",
+			Kind:        "corpus_json",
+			Dataset:     req.Dataset,
+			Path:        paths.corpus,
+			Status:      "written",
+			Description: "Service-managed corpus imported for this dataset.",
+		},
+	}
+	artifacts = append(artifacts, schemaUpdate.Artifacts...)
+	artifacts = append(artifacts, jobs.Artifact{
+		Name:          "metadata",
+		Role:          "output",
+		Kind:          "dataset_metadata_json",
+		SchemaVersion: SchemaVersion,
+		Dataset:       req.Dataset,
+		Path:          paths.metadata,
+		Status:        "written",
+		Description:   "Dataset import metadata persisted by the Go service.",
+	})
 	metadata := Metadata{
 		SchemaVersion: SchemaVersion,
 		Dataset:       req.Dataset,
@@ -174,36 +204,7 @@ func Import(cfg config.Config, req Request) (Metadata, error) {
 			CorpusPath: req.CorpusPath,
 			SchemaPath: req.SchemaPath,
 		},
-		Artifacts: []jobs.Artifact{
-			{
-				Name:        "corpus",
-				Role:        "input",
-				Kind:        "corpus_json",
-				Dataset:     req.Dataset,
-				Path:        paths.corpus,
-				Status:      "written",
-				Description: "Service-managed corpus imported for this dataset.",
-			},
-			{
-				Name:        "schema",
-				Role:        "input",
-				Kind:        "schema_json",
-				Dataset:     req.Dataset,
-				Path:        paths.schema,
-				Status:      "written",
-				Description: "Service-managed schema imported for this dataset.",
-			},
-			{
-				Name:          "metadata",
-				Role:          "output",
-				Kind:          "dataset_metadata_json",
-				SchemaVersion: SchemaVersion,
-				Dataset:       req.Dataset,
-				Path:          paths.metadata,
-				Status:        "written",
-				Description:   "Dataset import metadata persisted by the Go service.",
-			},
-		},
+		Artifacts: artifacts,
 	}
 	if err := writeMetadata(paths.metadata, metadata); err != nil {
 		return Metadata{}, err
@@ -381,17 +382,32 @@ func validateJSONFile(path string, label string) error {
 	return nil
 }
 
+func validateSchemaFile(path string) ([]byte, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read schema json: %w", err)
+	}
+	result := schemas.Validate(body)
+	if !result.Valid {
+		return nil, fmt.Errorf("invalid schema json: %s", strings.Join(result.Errors, "; "))
+	}
+	return body, nil
+}
+
 type paths struct {
-	corpus   string
-	schema   string
-	metadata string
+	corpus         string
+	schema         string
+	schemaMetadata string
+	metadata       string
 }
 
 func managedPaths(cfg config.Config, dataset string) paths {
+	metaRoot := datasetMetaRoot(cfg)
 	return paths{
-		corpus:   filepath.Join(cfg.CorpusRoot, "uploaded", dataset, "corpus.json"),
-		schema:   filepath.Join(cfg.SchemaRoot, dataset+".json"),
-		metadata: filepath.Join(datasetMetaRoot(cfg), dataset+".json"),
+		corpus:         filepath.Join(cfg.CorpusRoot, "uploaded", dataset, "corpus.json"),
+		schema:         filepath.Join(cfg.SchemaRoot, dataset+".json"),
+		schemaMetadata: filepath.Join(metaRoot, dataset+".schema.json"),
+		metadata:       filepath.Join(metaRoot, dataset+".json"),
 	}
 }
 
@@ -447,12 +463,22 @@ func managedDeleteArtifacts(cfg config.Config, dataset string) []jobs.Artifact {
 			Description: "Service-managed uploaded corpus for this dataset.",
 		},
 		{
-			Name:        "schema",
-			Role:        "input",
-			Kind:        "schema_json",
-			Dataset:     dataset,
-			Path:        paths.schema,
-			Description: "Service-managed schema for this dataset.",
+			Name:          "schema",
+			Role:          "input",
+			Kind:          "schema_json",
+			SchemaVersion: schemas.SchemaVersion,
+			Dataset:       dataset,
+			Path:          paths.schema,
+			Description:   "Service-managed schema for this dataset.",
+		},
+		{
+			Name:          "schema_metadata",
+			Role:          "metadata",
+			Kind:          "dataset_schema_metadata_json",
+			SchemaVersion: schemas.MetadataSchemaVersion,
+			Dataset:       dataset,
+			Path:          paths.schemaMetadata,
+			Description:   "Service-managed schema metadata.",
 		},
 		{
 			Name:          "metadata",
@@ -598,7 +624,7 @@ func choosePath(value string, fallback string) string {
 }
 
 func isCoreDatasetArtifact(name string) bool {
-	return name == "corpus" || name == "schema" || name == "metadata"
+	return name == "corpus" || name == "schema" || name == "schema_metadata" || name == "metadata"
 }
 
 func removeEmptyParent(path string) {

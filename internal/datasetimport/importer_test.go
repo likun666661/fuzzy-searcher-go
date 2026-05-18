@@ -15,7 +15,7 @@ func TestImportCopiesArtifactsAndWritesMetadata(t *testing.T) {
 	sourceCorpus := filepath.Join(dir, "source", "corpus.json")
 	sourceSchema := filepath.Join(dir, "source", "schema.json")
 	mustWrite(t, sourceCorpus, `[{"id":"doc1","text":"hello"}]`)
-	mustWrite(t, sourceSchema, `{"entities":[]}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	cfg := testConfig(dir)
 
 	metadata, err := datasetimport.Import(cfg, datasetimport.Request{
@@ -38,7 +38,7 @@ func TestImportCopiesArtifactsAndWritesMetadata(t *testing.T) {
 			t.Fatalf("expected artifact %s: %v", path, err)
 		}
 	}
-	if len(metadata.Artifacts) != 3 || metadata.Artifacts[2].Name != "metadata" || metadata.Artifacts[2].Status != "written" {
+	if len(metadata.Artifacts) != 4 || metadata.Artifacts[2].Name != "schema_metadata" || metadata.Artifacts[3].Name != "metadata" || metadata.Artifacts[3].Status != "written" {
 		t.Fatalf("artifacts = %#v", metadata.Artifacts)
 	}
 }
@@ -48,7 +48,7 @@ func TestImportRejectsUnsafeDatasetAndDuplicate(t *testing.T) {
 	sourceCorpus := filepath.Join(dir, "source", "corpus.json")
 	sourceSchema := filepath.Join(dir, "source", "schema.json")
 	mustWrite(t, sourceCorpus, `[]`)
-	mustWrite(t, sourceSchema, `{}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	cfg := testConfig(dir)
 
 	if _, err := datasetimport.Import(cfg, datasetimport.Request{Dataset: "../bad", CorpusPath: sourceCorpus, SchemaPath: sourceSchema}); !errors.Is(err, datasetimport.ErrInvalidDataset) {
@@ -69,7 +69,7 @@ func TestImportRejectsInvalidJSON(t *testing.T) {
 	sourceCorpus := filepath.Join(dir, "source", "corpus.json")
 	sourceSchema := filepath.Join(dir, "source", "schema.json")
 	mustWrite(t, sourceCorpus, `not-json`)
-	mustWrite(t, sourceSchema, `{}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 
 	_, err := datasetimport.Import(testConfig(dir), datasetimport.Request{Dataset: "demo", CorpusPath: sourceCorpus, SchemaPath: sourceSchema})
 	if err == nil {
@@ -83,7 +83,7 @@ func TestDeleteRemovesManagedArtifactsOnly(t *testing.T) {
 	sourceCorpus := filepath.Join(dir, "source", "corpus.json")
 	sourceSchema := filepath.Join(dir, "source", "schema.json")
 	mustWrite(t, sourceCorpus, `[]`)
-	mustWrite(t, sourceSchema, `{}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	if _, err := datasetimport.Import(cfg, datasetimport.Request{Dataset: "demo", CorpusPath: sourceCorpus, SchemaPath: sourceSchema}); err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -110,6 +110,7 @@ func TestDeleteRemovesManagedArtifactsOnly(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(dir, "data", "uploaded", "demo", "corpus.json"),
 		filepath.Join(dir, "schemas", "demo.json"),
+		filepath.Join(dir, "output", "datasets", "demo.schema.json"),
 		filepath.Join(dir, "output", "datasets", "demo.json"),
 		filepath.Join(dir, "output", "graphs", "demo_new.json"),
 		filepath.Join(dir, "output", "chunks", "demo.txt"),
@@ -148,7 +149,7 @@ func TestDeleteSupportsDryRunForceAndOutputScope(t *testing.T) {
 	sourceCorpus := filepath.Join(dir, "source", "corpus.json")
 	sourceSchema := filepath.Join(dir, "source", "schema.json")
 	mustWrite(t, sourceCorpus, `[]`)
-	mustWrite(t, sourceSchema, `{}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	if _, err := datasetimport.Import(cfg, datasetimport.Request{Dataset: "scoped", CorpusPath: sourceCorpus, SchemaPath: sourceSchema}); err != nil {
 		t.Fatalf("import scoped: %v", err)
 	}
@@ -172,7 +173,7 @@ func TestPlanRebuildValidatesManagedDatasetAndConflicts(t *testing.T) {
 	sourceCorpus := filepath.Join(dir, "source", "corpus.json")
 	sourceSchema := filepath.Join(dir, "source", "schema.json")
 	mustWrite(t, sourceCorpus, `[]`)
-	mustWrite(t, sourceSchema, `{}`)
+	mustWrite(t, sourceSchema, `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`)
 	if _, err := datasetimport.Import(cfg, datasetimport.Request{Dataset: "news", CorpusPath: sourceCorpus, SchemaPath: sourceSchema}); err != nil {
 		t.Fatalf("import: %v", err)
 	}
