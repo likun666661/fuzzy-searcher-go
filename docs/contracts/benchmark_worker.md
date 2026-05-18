@@ -39,6 +39,20 @@ Stable fields:
 - `limit`: optional max QA count. Defaults to worker behavior; production
   callers should set this explicitly for smoke runs.
 - `offset`: optional starting QA offset.
+- `concurrency`: optional worker concurrency. Defaults to `1`. Real model
+  smoke should keep this low; larger values require explicit approval because
+  they multiply API spend and rate-limit risk.
+- `rate_limit_rpm`: optional request-per-minute budget for LLM calls. The
+  worker should throttle before provider errors when this is set.
+- `checkpoint_path`: optional progress/checkpoint JSONL path. Defaults beside
+  `output_path`, such as `{output_path}.checkpoint.jsonl`.
+- `resume`: optional boolean. When true, the worker may skip questions already
+  present in `checkpoint_path`.
+- `checkpoint_every`: optional completed-item interval for flushing progress.
+  Defaults to `1` for smoke runs.
+- `max_failures`: optional failure budget. When exceeded, stop early and mark
+  the job failed.
+- `question_timeout_seconds`: optional per-question timeout budget.
 - `mode`: answer mode such as `noagent` or `agent`.
 - `top_k`: retrieval depth.
 - `answer_model`: model used for answer generation.
@@ -98,6 +112,13 @@ Optional fields append:
 | --- | --- |
 | `limit` | `--limit <n>` |
 | `offset` | `--offset <n>` |
+| `concurrency` | `--concurrency <n>` |
+| `rate_limit_rpm` | `--rate-limit-rpm <n>` |
+| `checkpoint_path` | `--checkpoint <path>` |
+| `resume` | `--resume` |
+| `checkpoint_every` | `--checkpoint-every <n>` |
+| `max_failures` | `--max-failures <n>` |
+| `question_timeout_seconds` | `--question-timeout <seconds>` |
 | `mode` | `--mode <value>` |
 | `top_k` | `--top-k <n>` |
 | `answer_model` | `--answer-model <value>` |
@@ -205,6 +226,8 @@ Expected artifacts:
 - `chunks`: optional input `chunks_txt`, status `configured`.
 - `schema`: optional input `schema_json`, status `configured`.
 - `cache`: optional input `faiss_cache_dir`, status `configured`.
+- `benchmark_checkpoint`: optional output `benchmark_checkpoint_jsonl`,
+  status `pending` -> `written`, used for progress and resume.
 - `benchmark_result`: output `benchmark_result_json`,
   `schema_version=benchmark-result/v1`.
 
@@ -223,10 +246,126 @@ Expected job events:
 - `queued`
 - `running`
 - `worker_started`
+- `benchmark_progress`
 - `artifact_benchmark_written` on success
 - `succeeded`, `failed`, or `canceled`
 
 The job `error` field must preserve worker stderr or output validation details.
+
+## Progress Contract
+
+Benchmark jobs may run for a long time and spend real model API budget.
+Progress must be observable through job events and, when configured, through a
+checkpoint artifact.
+
+`benchmark_progress` events should use this minimum payload in the event
+message or future structured event metadata:
+
+```json
+{
+  "schema_version": "benchmark-progress/v1",
+  "dataset": "anony_chs",
+  "total": 688,
+  "completed": 25,
+  "succeeded": 23,
+  "failed": 2,
+  "correct": 11,
+  "accuracy_so_far": 0.4783,
+  "current_id": "qa_25",
+  "checkpoint_path": "/abs/path/output/benchmarks/anony_chs.checkpoint.jsonl"
+}
+```
+
+Stable fields:
+
+- `total`: total planned questions after `offset` and `limit` are applied.
+- `completed`: items with terminal per-question outcome.
+- `succeeded`: items that produced an answer and judge result.
+- `failed`: items that failed after retry budget.
+- `correct`: items judged correct.
+- `accuracy_so_far`: `correct / succeeded` when `succeeded > 0`, otherwise
+  `0`.
+- `current_id`: current or most recently completed QA id.
+- `checkpoint_path`: checkpoint artifact path when configured.
+
+Event frequency should be bounded. Recommended defaults:
+
+- emit one progress event after every completed item for `limit <= 20`;
+- emit every `checkpoint_every` items for larger runs;
+- always emit a final progress event before `succeeded`, `failed`, or
+  `canceled`.
+
+## Checkpoint and Resume
+
+The checkpoint file should be append-only JSONL, one terminal item per line:
+
+```json
+{
+  "schema_version": "benchmark-checkpoint-item/v1",
+  "id": "qa_25",
+  "index": 24,
+  "question": "...",
+  "gold_answer": "...",
+  "predicted_answer": "...",
+  "judge": "1",
+  "correct": true,
+  "latency_ms": 11849,
+  "error": "",
+  "finished_at": "2026-05-18T00:00:00Z"
+}
+```
+
+Resume rules:
+
+- `resume=false`: ignore any existing checkpoint and start from the requested
+  offset.
+- `resume=true`: read checkpoint ids and skip completed items with matching
+  ids.
+- a malformed checkpoint should fail fast with `benchmark_checkpoint_invalid`;
+- final `benchmark-result/v1.items` should include both resumed items and newly
+  completed items in QA order.
+
+The first implementation may keep resume inside the Python worker. Go only
+needs to pass the fields, record the checkpoint artifact, and expose progress
+through events.
+
+## Concurrency and Cost Controls
+
+Concurrency and rate limiting are part of the external contract because this
+job can spend real API money.
+
+Rules:
+
+- default `concurrency=1`;
+- `concurrency` must be a positive integer;
+- implementation should cap concurrency to a conservative service maximum
+  unless a future admin config raises it;
+- `rate_limit_rpm` applies to model calls, not just questions, because each
+  question may call both answer and judge models;
+- `limit` should be required or strongly enforced for smoke runs against large
+  datasets such as AnonyRAG;
+- API keys must not appear in progress events, checkpoint rows, final result,
+  stdout/stderr summaries, job spec, or operation history.
+
+Recommended failure codes:
+
+- `benchmark_invalid_concurrency`: invalid or unsupported concurrency value.
+- `benchmark_rate_limited`: provider or worker rate limit stopped the run.
+- `benchmark_checkpoint_invalid`: checkpoint could not be parsed for resume.
+- `benchmark_failure_budget_exceeded`: `max_failures` was exceeded.
+
+## Cancellation Semantics
+
+Cancellation should be cooperative:
+
+- Go canceling the job should signal the worker process as current job runners
+  do for other workers.
+- The Python worker should stop between questions when it observes cancellation
+  or receives a termination signal.
+- Completed checkpoint rows should remain on disk.
+- The job should end as `canceled` when cancellation is explicit, not `failed`.
+- Partial final output is optional on cancel; checkpoint is the durable partial
+  artifact.
 
 ## Benchmark Workflow
 
@@ -296,8 +435,11 @@ Stable error meanings:
 - `benchmark_output_missing`: worker exited `0` but output file is missing.
 - `benchmark_output_invalid`: output JSON is malformed or not
   `benchmark-result/v1`.
+- `benchmark_checkpoint_invalid`: checkpoint JSONL is malformed.
 - `benchmark_llm_unconfigured`: required model/API environment is missing.
 - `benchmark_judge_invalid`: judge output cannot be interpreted as `1` or `0`.
+- `benchmark_failure_budget_exceeded`: per-item failures exceeded
+  `max_failures`.
 
 When a worker fails due to missing API key, the job error should say which env
 var is missing but must not include secret values.
@@ -314,5 +456,8 @@ Phase 26 validation should verify:
 - worker failure, missing output, bad schema version, and invalid judge output
   fail the job with stable diagnostics.
 - optional workflow mode can run benchmark alone or build_graph then benchmark.
+- progress events expose completed/total/correct/failed counts.
+- checkpoint/resume can recover completed items without re-answering them.
+- concurrency/rate-limit inputs are persisted without exposing API keys.
 - existing release-check, service-smoke, demo-service-smoke, and job/workflow
   gates do not regress.

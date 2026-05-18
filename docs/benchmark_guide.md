@@ -70,6 +70,7 @@ AnonyRAG 这种数据集上效果怎么样？”
 3. service 自动调度 retrieve/answer/judge。
 4. 每道题都留下 job/operation 记录。
 5. 输出一个 `benchmark-result/v1` artifact。
+6. 对长 benchmark 输出 progress/checkpoint，支持小并发和失败可恢复。
 
 这层从 Phase 26 开始服务化：benchmark job/workflow 的稳定合同在
 `docs/contracts/benchmark_worker.md`。
@@ -406,7 +407,29 @@ Phase 26 的目标合同：
 这样做的收益是：以后换数据集、换模型、换 judge，都不用临时写脚本，只改 job
 spec。
 
-## 8. DeepSeek / API key 处理原则
+## 8. 长 benchmark 的 progress / concurrency 建议
+
+AnonyRAG 中文集有 688 条 QA，英文集有 709 条 QA。不要一上来全量高并发跑。
+
+建议顺序：
+
+1. `limit=1`：确认 key、worker、judge 输出正常。
+2. `limit=10`、`concurrency=1`：确认稳定性和平均耗时。
+3. `limit=50`、`concurrency=1-2`：观察失败率、rate limit、成本。
+4. 全量：只在 progress/checkpoint 已经可用时跑。
+
+服务化 benchmark 应记录：
+
+- `benchmark_progress` events：completed/total/correct/failed/accuracy_so_far；
+- checkpoint JSONL：每道题的 terminal item，支持 resume；
+- `max_failures`：避免坏配置烧完整个数据集；
+- `rate_limit_rpm`：避免 API provider 429；
+- `concurrency`：默认 1，提并发需要显式配置。
+
+详细合同见 `docs/contracts/benchmark_worker.md` 的 progress/concurrency
+章节。
+
+## 9. DeepSeek / API key 处理原则
 
 真实模型 benchmark 优先使用 DeepSeek，但 key 只通过环境变量传给 Python
 worker：

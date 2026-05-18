@@ -391,6 +391,8 @@ Benchmark jobs report `qa` and optional graph/chunks/schema/cache input
 artifacts plus a `benchmark_result` output artifact with
 `schema_version=benchmark-result/v1`. Completed jobs return a compact inline
 `benchmark-job-result/v1` summary; the full item-level result stays on disk.
+Long benchmark runs should emit `benchmark_progress` events and may write a
+`benchmark_checkpoint` JSONL artifact for resume.
 
 The detailed Python worker and workflow contract is defined in
 `docs/contracts/benchmark_worker.md`.
