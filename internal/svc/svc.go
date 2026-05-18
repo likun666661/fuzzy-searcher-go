@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/fuzzy-searcher-go/internal/artifacts"
@@ -17,6 +18,7 @@ import (
 	"github.com/fuzzy-searcher-go/internal/datasetops"
 	"github.com/fuzzy-searcher-go/internal/jobs"
 	"github.com/fuzzy-searcher-go/internal/orchestrator"
+	"github.com/fuzzy-searcher-go/internal/schemas"
 	"github.com/fuzzy-searcher-go/internal/sidecarstatus"
 	"github.com/fuzzy-searcher-go/internal/workers/answer"
 	"github.com/fuzzy-searcher-go/internal/workers/buildgraph"
@@ -55,10 +57,14 @@ func (s *Service) Routes() http.Handler {
 	mux.HandleFunc("GET /readyz", s.handleReady)
 	mux.HandleFunc("GET /v1/version", s.handleVersion)
 	mux.HandleFunc("GET /v1/datasets", s.handleDatasets)
+	mux.HandleFunc("GET /v1/schemas", s.handleSchemas)
+	mux.HandleFunc("POST /v1/schemas/validate", s.handleValidateSchema)
 	mux.HandleFunc("POST /v1/datasets/import", s.handleImportDataset)
 	mux.HandleFunc("GET /v1/dataset-operations", s.handleDatasetOperations)
 	mux.HandleFunc("GET /v1/dataset-operations/{operation_id}", s.handleDatasetOperation)
 	mux.HandleFunc("GET /v1/datasets/{dataset}", s.handleDataset)
+	mux.HandleFunc("GET /v1/datasets/{dataset}/schema", s.handleDatasetSchema)
+	mux.HandleFunc("PUT /v1/datasets/{dataset}/schema", s.handlePutDatasetSchema)
 	mux.HandleFunc("DELETE /v1/datasets/{dataset}", s.handleDeleteDataset)
 	mux.HandleFunc("POST /v1/datasets/{dataset}/rebuild", s.handleRebuildDataset)
 	mux.HandleFunc("GET /v1/datasets/{dataset}/operations", s.handleDatasetOperationsForDataset)
@@ -140,6 +146,51 @@ func (s *Service) handleDatasets(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Service) handleSchemas(w http.ResponseWriter, r *http.Request) {
+	records, err := schemas.List(s.config)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "schema_list_failed", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"schema_version": "schema-management-list/v1",
+		"count":          len(records),
+		"schemas":        records,
+	})
+}
+
+type validateSchemaRequest struct {
+	Schema json.RawMessage `json:"schema"`
+}
+
+func (s *Service) handleValidateSchema(w http.ResponseWriter, r *http.Request) {
+	var input validateSchemaRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err)
+		return
+	}
+	result := schemas.Validate(input.Schema)
+	if !result.Valid {
+		status := http.StatusBadRequest
+		code := "invalid_schema"
+		for _, message := range result.Errors {
+			if strings.Contains(message, schemas.ErrDuplicateItem.Error()) {
+				code = "duplicate_schema_item"
+				break
+			}
+		}
+		writeJSON(w, status, map[string]any{
+			"error": map[string]any{
+				"code":    code,
+				"message": strings.Join(result.Errors, "; "),
+			},
+			"result": result,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Service) handleDatasetOperations(w http.ResponseWriter, r *http.Request) {
 	operations := s.ops.List("")
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -196,6 +247,85 @@ func (s *Service) handleDataset(w http.ResponseWriter, r *http.Request) {
 	}
 	registry := artifacts.NewRegistry(s.config)
 	writeJSON(w, http.StatusOK, registry.Get(name))
+}
+
+func (s *Service) handleDatasetSchema(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("dataset")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_dataset", fmt.Errorf("dataset is required"))
+		return
+	}
+	record, err := schemas.Get(s.config, name, schemas.GetOptions{
+		AllowFallback: queryBoolDefault(r, "allow_fallback", true),
+		IncludeBody:   queryBoolDefault(r, "include_body", true),
+	})
+	if err != nil {
+		writeSchemaError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, record)
+}
+
+type putDatasetSchemaRequest struct {
+	Schema     json.RawMessage `json:"schema,omitempty"`
+	Overwrite  *bool           `json:"overwrite,omitempty"`
+	SourcePath string          `json:"source_path,omitempty"`
+}
+
+func (s *Service) handlePutDatasetSchema(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("dataset")
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "invalid_dataset", fmt.Errorf("dataset is required"))
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err)
+		return
+	}
+	var envelope putDatasetSchemaRequest
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err)
+		return
+	}
+	schemaBody := envelope.Schema
+	if len(schemaBody) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_schema", fmt.Errorf("schema is required"))
+		return
+	}
+	overwrite := false
+	if envelope.Overwrite != nil {
+		overwrite = *envelope.Overwrite
+	}
+	record, err := schemas.Put(s.config, schemas.PutRequest{
+		Dataset:    name,
+		Schema:     schemaBody,
+		Overwrite:  overwrite,
+		SourcePath: envelope.SourcePath,
+	})
+	if err != nil {
+		s.recordDatasetOperation(datasetops.Operation{
+			Dataset: name,
+			Type:    datasetops.TypeSchemaUpdate,
+			Status:  "failed",
+			Request: map[string]any{
+				"overwrite":   overwrite,
+				"source_path": envelope.SourcePath,
+			},
+			Error: err.Error(),
+		})
+		writeSchemaError(w, err)
+		return
+	}
+	s.recordDatasetOperation(datasetops.Operation{
+		Dataset:   name,
+		Type:      datasetops.TypeSchemaUpdate,
+		Status:    "succeeded",
+		Request:   map[string]any{"overwrite": overwrite, "source_path": envelope.SourcePath},
+		Artifacts: record.Artifacts,
+		Result:    record,
+	})
+	writeJSON(w, http.StatusOK, record)
 }
 
 func (s *Service) handleDeleteDataset(w http.ResponseWriter, r *http.Request) {
@@ -1559,6 +1689,25 @@ func writeDatasetRebuildError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "dataset_rebuild_conflict", err)
 	default:
 		writeError(w, http.StatusInternalServerError, "dataset_rebuild_failed", err)
+	}
+}
+
+func writeSchemaError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, schemas.ErrInvalidDataset):
+		writeError(w, http.StatusBadRequest, "invalid_dataset", err)
+	case errors.Is(err, schemas.ErrDuplicateItem):
+		writeError(w, http.StatusBadRequest, "duplicate_schema_item", err)
+	case errors.Is(err, schemas.ErrInvalidSchema):
+		writeError(w, http.StatusBadRequest, "invalid_schema", err)
+	case errors.Is(err, schemas.ErrAlreadyExists):
+		writeError(w, http.StatusConflict, "schema_exists", err)
+	case errors.Is(err, schemas.ErrNotFound):
+		writeError(w, http.StatusNotFound, "schema_not_found", err)
+	case errors.Is(err, schemas.ErrWriteFailed):
+		writeError(w, http.StatusInternalServerError, "schema_write_failed", err)
+	default:
+		writeError(w, http.StatusInternalServerError, "schema_management_failed", err)
 	}
 }
 

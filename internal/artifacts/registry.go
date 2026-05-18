@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/fuzzy-searcher-go/internal/config"
+	"github.com/fuzzy-searcher-go/internal/schemas"
 )
 
 // Registry maps Youtu-RAG datasets to their filesystem artifacts.
@@ -30,11 +31,18 @@ type Dataset struct {
 
 // Artifact describes one expected dataset artifact.
 type Artifact struct {
-	Name     string `json:"name"`
-	Path     string `json:"path"`
-	Exists   bool   `json:"exists"`
-	Kind     string `json:"kind"`
-	Required bool   `json:"required"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	Exists        bool   `json:"exists"`
+	Kind          string `json:"kind"`
+	Required      bool   `json:"required"`
+	Role          string `json:"role,omitempty"`
+	Dataset       string `json:"dataset,omitempty"`
+	SchemaVersion string `json:"schema_version,omitempty"`
+	Status        string `json:"status,omitempty"`
+	Hash          string `json:"hash,omitempty"`
+	Version       int    `json:"version,omitempty"`
+	Fallback      bool   `json:"fallback,omitempty"`
 }
 
 // List returns discovered datasets.
@@ -65,7 +73,7 @@ func (r *Registry) Get(name string) Dataset {
 func (r *Registry) Artifacts(name string) []Artifact {
 	return []Artifact{
 		r.artifact("corpus", r.corpusPath(name), "file", false),
-		r.artifact("schema", filepath.Join(r.config.SchemaRoot, name+".json"), "file", false),
+		r.schemaArtifact(name),
 		r.artifact("graph", r.graphPath(name), "file", true),
 		r.artifact("chunks", r.chunksPath(name), "file", true),
 		r.artifact("cache", filepath.Join(r.config.CacheRoot, name), "dir", true),
@@ -82,6 +90,53 @@ func (r *Registry) artifact(name string, path string, kind string, required bool
 		Kind:     kind,
 		Required: required,
 		Exists:   exists(path, kind),
+	}
+}
+
+func (r *Registry) schemaArtifact(name string) Artifact {
+	record, err := schemas.Get(r.config, name, schemas.GetOptions{
+		AllowFallback: true,
+		IncludeBody:   false,
+	})
+	if err != nil {
+		path := filepath.Join(r.config.SchemaRoot, name+".json")
+		if exists(path, "file") {
+			return Artifact{
+				Name:          "schema",
+				Path:          path,
+				Exists:        true,
+				Kind:          "file",
+				Required:      false,
+				Role:          "input",
+				Dataset:       name,
+				SchemaVersion: schemas.SchemaVersion,
+				Status:        "invalid",
+			}
+		}
+		return Artifact{
+			Name:          "schema",
+			Path:          path,
+			Kind:          "file",
+			Required:      false,
+			Role:          "input",
+			Dataset:       name,
+			SchemaVersion: schemas.SchemaVersion,
+			Status:        "missing",
+		}
+	}
+	return Artifact{
+		Name:          "schema",
+		Path:          record.Path,
+		Exists:        true,
+		Kind:          "file",
+		Required:      false,
+		Role:          "input",
+		Dataset:       name,
+		SchemaVersion: schemas.SchemaVersion,
+		Status:        record.Status,
+		Hash:          record.Hash,
+		Version:       record.Version,
+		Fallback:      record.Fallback,
 	}
 }
 

@@ -116,6 +116,110 @@ func TestDatasetEndpoints(t *testing.T) {
 	}
 }
 
+func TestDatasetSchemaManagementEndpoint(t *testing.T) {
+	root := t.TempDir()
+	defaultSchema := `{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}`
+	mustWrite(t, filepath.Join(root, "schemas", "default.json"), defaultSchema)
+	routes := svc.NewService(config.Config{
+		ArtifactRoot:   root,
+		DefaultDataset: "demo",
+		SchemaRoot:     filepath.Join(root, "schemas"),
+		CorpusRoot:     filepath.Join(root, "data"),
+		GraphRoot:      filepath.Join(root, "output", "graphs"),
+		ChunksRoot:     filepath.Join(root, "output", "chunks"),
+		CacheRoot:      filepath.Join(root, "retriever", "faiss_cache_new"),
+		GoldenRoot:     filepath.Join(root, "output", "retrieval_golden"),
+		TraceRoot:      filepath.Join(root, "output", "retrieval_traces"),
+	}).Routes()
+
+	fallback := httptest.NewRecorder()
+	routes.ServeHTTP(fallback, httptest.NewRequest(http.MethodGet, "/v1/datasets/news/schema", nil))
+	if fallback.Code != http.StatusOK ||
+		!strings.Contains(fallback.Body.String(), `"schema_version":"dataset-schema/v1"`) ||
+		!strings.Contains(fallback.Body.String(), `"status":"fallback"`) ||
+		!strings.Contains(fallback.Body.String(), `"fallback":true`) {
+		t.Fatalf("fallback schema status = %d, body = %s", fallback.Code, fallback.Body.String())
+	}
+
+	put := httptest.NewRecorder()
+	body := bytes.NewBufferString(`{"schema":{"Nodes":["organization"],"Relations":["located_in"],"Attributes":["name"]},"source_path":"/tmp/schema.json"}`)
+	routes.ServeHTTP(put, httptest.NewRequest(http.MethodPut, "/v1/datasets/news/schema", body))
+	if put.Code != http.StatusOK ||
+		!strings.Contains(put.Body.String(), `"schema_version":"dataset-schema-update/v1"`) ||
+		!strings.Contains(put.Body.String(), `"status":"written"`) ||
+		!strings.Contains(put.Body.String(), `"hash"`) ||
+		!strings.Contains(put.Body.String(), `"version":1`) ||
+		!strings.Contains(put.Body.String(), `"name":"schema_metadata"`) {
+		t.Fatalf("put schema status = %d, body = %s", put.Code, put.Body.String())
+	}
+	managedPath := filepath.Join(root, "schemas", "news.json")
+	if _, err := os.Stat(managedPath); err != nil {
+		t.Fatalf("managed schema not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "output", "datasets", "news.schema.json")); err != nil {
+		t.Fatalf("schema metadata not written: %v", err)
+	}
+
+	got := httptest.NewRecorder()
+	routes.ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/v1/datasets/news/schema", nil))
+	if got.Code != http.StatusOK ||
+		!strings.Contains(got.Body.String(), `"status":"ready"`) ||
+		!strings.Contains(got.Body.String(), `"fallback":false`) ||
+		!strings.Contains(got.Body.String(), managedPath) {
+		t.Fatalf("get schema status = %d, body = %s", got.Code, got.Body.String())
+	}
+
+	conflict := httptest.NewRecorder()
+	routes.ServeHTTP(conflict, httptest.NewRequest(http.MethodPut, "/v1/datasets/news/schema", bytes.NewBufferString(`{"schema":{"Nodes":["event"],"Relations":["related_to"],"Attributes":["name"]}}`)))
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), `"code":"schema_exists"`) {
+		t.Fatalf("conflict status = %d, body = %s", conflict.Code, conflict.Body.String())
+	}
+
+	validate := httptest.NewRecorder()
+	routes.ServeHTTP(validate, httptest.NewRequest(http.MethodPost, "/v1/schemas/validate", bytes.NewBufferString(`{"schema":{"Nodes":["person"],"Relations":["knows"],"Attributes":["name"]}}`)))
+	if validate.Code != http.StatusOK || !strings.Contains(validate.Body.String(), `"schema_version":"schema-validation/v1"`) || !strings.Contains(validate.Body.String(), `"valid":true`) {
+		t.Fatalf("validate status = %d, body = %s", validate.Code, validate.Body.String())
+	}
+
+	list := httptest.NewRecorder()
+	routes.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/v1/schemas", nil))
+	if list.Code != http.StatusOK ||
+		!strings.Contains(list.Body.String(), `"schema_version":"schema-management-list/v1"`) ||
+		!strings.Contains(list.Body.String(), `"dataset":"news"`) {
+		t.Fatalf("list schemas status = %d, body = %s", list.Code, list.Body.String())
+	}
+
+	ops := httptest.NewRecorder()
+	routes.ServeHTTP(ops, httptest.NewRequest(http.MethodGet, "/v1/datasets/news/operations", nil))
+	if ops.Code != http.StatusOK ||
+		!strings.Contains(ops.Body.String(), `"type":"schema_update"`) ||
+		!strings.Contains(ops.Body.String(), `"status":"succeeded"`) ||
+		!strings.Contains(ops.Body.String(), `"name":"schema_metadata"`) {
+		t.Fatalf("schema operation status = %d, body = %s", ops.Code, ops.Body.String())
+	}
+
+	bad := httptest.NewRecorder()
+	routes.ServeHTTP(bad, httptest.NewRequest(http.MethodPut, "/v1/datasets/bad/schema", bytes.NewBufferString(`{"schema":{"Nodes":"person"}}`)))
+	if bad.Code != http.StatusBadRequest || !strings.Contains(bad.Body.String(), `"code":"invalid_schema"`) {
+		t.Fatalf("bad schema status = %d, body = %s", bad.Code, bad.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "schemas", "bad.json")); !os.IsNotExist(err) {
+		t.Fatalf("bad schema should not be written, stat err = %v", err)
+	}
+
+	duplicate := httptest.NewRecorder()
+	routes.ServeHTTP(duplicate, httptest.NewRequest(http.MethodPost, "/v1/schemas/validate", bytes.NewBufferString(`{"schema":{"Nodes":["person","person"],"Relations":["knows"],"Attributes":["name"]}}`)))
+	if duplicate.Code != http.StatusBadRequest || !strings.Contains(duplicate.Body.String(), `"code":"duplicate_schema_item"`) {
+		t.Fatalf("duplicate status = %d, body = %s", duplicate.Code, duplicate.Body.String())
+	}
+
+	invalidDataset := httptest.NewRecorder()
+	routes.ServeHTTP(invalidDataset, httptest.NewRequest(http.MethodGet, "/v1/datasets/bad$name/schema", nil))
+	if invalidDataset.Code != http.StatusBadRequest || !strings.Contains(invalidDataset.Body.String(), `"code":"invalid_dataset"`) {
+		t.Fatalf("invalid dataset status = %d, body = %s", invalidDataset.Code, invalidDataset.Body.String())
+	}
+}
+
 func TestDatasetImportEndpoint(t *testing.T) {
 	root := t.TempDir()
 	sourceCorpus := filepath.Join(root, "incoming", "corpus.json")

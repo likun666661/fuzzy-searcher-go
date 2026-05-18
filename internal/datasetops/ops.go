@@ -22,6 +22,7 @@ const (
 	TypeDelete        = "delete"
 	TypeRebuild       = "rebuild"
 	TypeCreateDataset = "create_dataset"
+	TypeSchemaUpdate  = "schema_update"
 )
 
 // Operation is the stable, user-visible record for one dataset lifecycle
