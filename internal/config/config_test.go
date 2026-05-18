@@ -1,9 +1,12 @@
 package config_test
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +131,188 @@ func TestValidateServiceConfigurationProfiles(t *testing.T) {
 	}
 }
 
+func TestValidateServiceConfigurationStableChecksAndFailureProfiles(t *testing.T) {
+	dir := t.TempDir()
+	graph := filepath.Join(dir, "output", "graphs", "demo_new.json")
+	chunks := filepath.Join(dir, "output", "chunks", "demo.txt")
+	for _, path := range []string{graph, chunks} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	report := config.Validate(config.Config{
+		Profile:        "demo",
+		HTTPAddr:       "127.0.0.1:0",
+		DefaultDataset: "demo",
+		DefaultMode:    "native-path1-rerank",
+		DefaultSidecar: "http://127.0.0.1:8765",
+		ArtifactRoot:   dir,
+		DefaultGraph:   graph,
+		DefaultChunks:  chunks,
+	})
+	if !report.Ready {
+		t.Fatalf("demo report should be ready: %#v err=%v", report, report.Err())
+	}
+	wantNames := []string{
+		"profile",
+		"http_addr",
+		"default_dataset",
+		"artifact_root",
+		"worker_cwd",
+		"python_bin",
+		"golden_script",
+		"parse_documents_script",
+		"build_graph_script",
+		"answer_script",
+		"default_graph",
+		"default_chunks",
+		"sidecar_url",
+	}
+	var gotNames []string
+	for _, check := range report.Checks {
+		gotNames = append(gotNames, check.Name)
+	}
+	if !reflect.DeepEqual(gotNames, wantNames) {
+		t.Fatalf("check names = %#v, want %#v", gotNames, wantNames)
+	}
+
+	demoMissing := config.Validate(config.Config{
+		Profile:        "demo",
+		HTTPAddr:       "127.0.0.1:0",
+		DefaultDataset: "demo",
+		DefaultMode:    "native-path1-rerank",
+		ArtifactRoot:   filepath.Join(dir, "missing"),
+		DefaultGraph:   filepath.Join(dir, "missing", "graph.json"),
+		DefaultChunks:  filepath.Join(dir, "missing", "chunks.txt"),
+	})
+	if demoMissing.Ready || demoMissing.Err() == nil {
+		t.Fatalf("demo missing report = %#v err=%v", demoMissing, demoMissing.Err())
+	}
+	assertValidationCheck(t, demoMissing, "artifact_root", "failed", true)
+	assertValidationCheck(t, demoMissing, "default_graph", "failed", true)
+	assertValidationCheck(t, demoMissing, "default_chunks", "failed", true)
+	assertValidationCheck(t, demoMissing, "sidecar_url", "failed", true)
+
+	invalidProfile := config.Validate(config.Config{
+		Profile:        "staging",
+		HTTPAddr:       "127.0.0.1:0",
+		DefaultDataset: "demo",
+		DefaultMode:    "native",
+	})
+	if invalidProfile.Ready || invalidProfile.Err() == nil {
+		t.Fatalf("invalid profile report = %#v err=%v", invalidProfile, invalidProfile.Err())
+	}
+	assertValidationCheck(t, invalidProfile, "profile", "failed", true)
+}
+
+func TestServiceCheckConfigCommandAndValidateOnStart(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	bin := filepath.Join(t.TempDir(), "youtu-rag-service")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/youtu-rag-service")
+	build.Dir = repoRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build service binary: %v\n%s", err, out)
+	}
+
+	dir := t.TempDir()
+	graph := filepath.Join(dir, "output", "graphs", "demo_new.json")
+	chunks := filepath.Join(dir, "output", "chunks", "demo.txt")
+	if err := os.MkdirAll(filepath.Dir(graph), 0o755); err != nil {
+		t.Fatalf("mkdir graph: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(chunks), 0o755); err != nil {
+		t.Fatalf("mkdir chunks: %v", err)
+	}
+	if err := os.WriteFile(graph, []byte("[]"), 0o644); err != nil {
+		t.Fatalf("write graph: %v", err)
+	}
+	if err := os.WriteFile(chunks, []byte("id: c1\tChunk: hello\n"), 0o644); err != nil {
+		t.Fatalf("write chunks: %v", err)
+	}
+
+	ready := exec.Command(bin, "--check-config")
+	ready.Env = append(os.Environ(),
+		"YOUTU_RAG_PROFILE=demo",
+		"YOUTU_RAG_MODE=native",
+		"YOUTU_RAG_DATASET=demo",
+		"YOUTU_RAG_ARTIFACT_ROOT="+dir,
+		"YOUTU_RAG_GRAPH="+graph,
+		"YOUTU_RAG_CHUNKS="+chunks,
+	)
+	out, err := ready.CombinedOutput()
+	if err != nil {
+		t.Fatalf("ready check-config failed: %v\n%s", err, out)
+	}
+	var report config.ValidationReport
+	if err := json.Unmarshal(out, &report); err != nil {
+		t.Fatalf("decode ready check-config: %v\n%s", err, out)
+	}
+	if report.SchemaVersion != config.ValidationSchemaVersion || !report.Ready || report.Profile != "demo" {
+		t.Fatalf("ready report = %#v", report)
+	}
+
+	missing := exec.Command(bin, "--check-config")
+	missing.Env = append(os.Environ(),
+		"YOUTU_RAG_PROFILE=demo",
+		"YOUTU_RAG_MODE=native-path1-rerank",
+		"YOUTU_RAG_DATASET=demo",
+		"YOUTU_RAG_ARTIFACT_ROOT="+filepath.Join(dir, "missing"),
+		"YOUTU_RAG_GRAPH="+filepath.Join(dir, "missing", "graph.json"),
+		"YOUTU_RAG_CHUNKS="+filepath.Join(dir, "missing", "chunks.txt"),
+		"YOUTU_RAG_SIDECAR_URL=",
+	)
+	out, err = missing.CombinedOutput()
+	if err == nil {
+		t.Fatalf("missing check-config unexpectedly passed:\n%s", out)
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 2 {
+		t.Fatalf("missing check-config exit = %v, output:\n%s", err, out)
+	}
+	if err := json.Unmarshal(out, &report); err != nil {
+		t.Fatalf("decode missing check-config: %v\n%s", err, out)
+	}
+	if report.Ready {
+		t.Fatalf("missing report should not be ready: %#v", report)
+	}
+	assertValidationCheck(t, report, "sidecar_url", "failed", true)
+	assertValidationCheck(t, report, "default_graph", "failed", true)
+
+	strict := exec.Command(bin)
+	strict.Env = append(os.Environ(),
+		"YOUTU_RAG_PROFILE=staging",
+		"YOUTU_RAG_VALIDATE_ON_START=true",
+		"YOUTU_RAG_HTTP_ADDR=127.0.0.1:0",
+	)
+	out, err = strict.CombinedOutput()
+	if err == nil {
+		t.Fatalf("strict startup unexpectedly passed:\n%s", out)
+	}
+	if !strings.Contains(string(out), "service configuration is not ready") || !strings.Contains(string(out), "profile") {
+		t.Fatalf("strict startup output = %s", out)
+	}
+}
+
+func TestRunServiceLocalScriptHelp(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	cmd := exec.Command("sh", "scripts/run_service_local.sh", "--help")
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("service local help failed: %v\n%s", err, out)
+	}
+	body := string(out)
+	for _, want := range []string{"Usage: scripts/run_service_local.sh", "--check-only", "YOUTU_RAG_PROFILE=local|demo|production"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("help output missing %q:\n%s", want, body)
+		}
+	}
+}
+
 func TestLoadFallsBackOnInvalidNumericEnvironment(t *testing.T) {
 	t.Setenv("YOUTU_RAG_DATASET", "demo")
 	t.Setenv("YOUTU_RAG_DATASETS", " , ")
@@ -144,4 +329,17 @@ func TestLoadFallsBackOnInvalidNumericEnvironment(t *testing.T) {
 	if cfg.ShutdownGrace != 10*time.Second {
 		t.Fatalf("shutdown fallback = %v", cfg.ShutdownGrace)
 	}
+}
+
+func assertValidationCheck(t *testing.T, report config.ValidationReport, name string, status string, required bool) {
+	t.Helper()
+	for _, check := range report.Checks {
+		if check.Name == name {
+			if check.Status != status || check.Required != required {
+				t.Fatalf("check %s = %#v, want status=%s required=%v", name, check, status, required)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing check %s in %#v", name, report.Checks)
 }
