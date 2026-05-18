@@ -336,6 +336,15 @@ answer 里抽取匿名映射，输出 `anonymized_mapping` 聚合指标和每题
 回答 `洪信（即洪太尉）`，LLM judge 可能判对；deterministic scorer 会在 relaxed
 `matched_count` 里算对，同时 strict `exact_recall` 会提醒它没有完全按 gold 名称输出。
 
+为了让 strict 指标更有意义，worker 对 AnonyRAG 映射题做了两个约束：
+
+- 首答 prompt 要求只输出 `ID——实体` 映射行；
+- 首答后会做一次不看 gold 的 format repair，只把问题、上下文、首答和 required
+  anonymous IDs 给模型，让它补齐并改成稳定映射格式。
+
+最终结果里 `answer_repaired=true` 表示 `predicted_answer` 是 repair 后的答案，
+`original_predicted_answer` 保留首答，便于排查 repair 是否把语义改坏。
+
 ## 6. 用 Go service 做 benchmark 时目前能做到什么
 
 当前 Go service 已经具备这些长期服务能力：

@@ -140,6 +140,16 @@ def select_context(question: str, chunks: list[dict[str, str]], limit: int = 4) 
     return [chunk for _, chunk in scored[:limit]]
 
 
+def anonymized_ids(text: str) -> list[str]:
+    return sorted(set(ANON_ID_RE.findall(text or "")))
+
+
+def is_anonymized_mapping_task(question: str) -> bool:
+    if not anonymized_ids(question):
+        return False
+    return "匿名化" in question or "被匿名" in question or "匿名" in question
+
+
 def model_name(preferred: str) -> str:
     return preferred or os.getenv("LLM_MODEL") or DEFAULT_MODEL
 
@@ -204,13 +214,58 @@ def answer_question(
     )
     if context_text:
         user += f"Context:\n{context_text}\n\n"
-    user += f"Question:\n{question}\n\nAnswer concisely."
+    user += f"Question:\n{question}\n\n"
+    if is_anonymized_mapping_task(question):
+        ids = ", ".join(anonymized_ids(question))
+        user += (
+            "This is an anonymized entity restoration task. Return only mapping lines, one per anonymized id.\n"
+            f"Required ids: {ids}\n"
+            "Format each line exactly as: ID——实体\n"
+            "Do not include bullets, brackets, explanations, aliases, confidence, or extra prose.\n\n"
+        )
+    user += "Answer concisely."
     return chat_completion(
         base_url,
         key,
         model,
         [
             {"role": "system", "content": "You are a careful QA benchmark answerer."},
+            {"role": "user", "content": user},
+        ],
+        timeout,
+    )
+
+
+def repair_mapping_answer(
+    base_url: str,
+    key: str,
+    model: str,
+    question: str,
+    contexts: list[dict[str, str]],
+    predicted: str,
+    timeout: float,
+) -> str:
+    ids = anonymized_ids(question)
+    context_text = "\n\n".join(
+        f"[chunk {chunk['id']}] {chunk.get('title', '')}\n{chunk['text'][:1200]}" for chunk in contexts
+    )
+    user = (
+        "Rewrite the previous answer into strict anonymized mapping format.\n"
+        "Use the question and context only; do not invent ids that are not listed.\n"
+        "Return every required id exactly once, one line per id.\n"
+        "Output format: ID——实体\n"
+        "No bullets, brackets, explanations, aliases, descriptions, or extra prose.\n\n"
+        f"Required ids: {', '.join(ids)}\n\n"
+    )
+    if context_text:
+        user += f"Context:\n{context_text}\n\n"
+    user += f"Question:\n{question}\n\nPrevious answer:\n{predicted}\n"
+    return chat_completion(
+        base_url,
+        key,
+        model,
+        [
+            {"role": "system", "content": "You format anonymized entity restoration answers as strict mapping lines."},
             {"role": "user", "content": user},
         ],
         timeout,
@@ -483,11 +538,24 @@ def run_one_item(
     gold = row["_answer"]
     contexts = select_context(question, corpus, limit=min(max(args.top_k, 1), 6))
     predicted = ""
+    original_predicted = ""
     judge = "0"
     error = ""
+    repair_error = ""
+    repaired = False
     try:
         rate_limiter.wait()
         predicted = answer_question(base_url, key, answer_model, question, contexts, timeout)
+        original_predicted = predicted
+        if is_anonymized_mapping_task(question):
+            try:
+                rate_limiter.wait()
+                repaired_answer = repair_mapping_answer(base_url, key, answer_model, question, contexts, predicted, timeout)
+                if extract_anonymized_mappings(repaired_answer):
+                    predicted = repaired_answer
+                    repaired = True
+            except Exception as exc:
+                repair_error = str(exc)
         rate_limiter.wait()
         judge = judge_answer(base_url, key, judge_model, question, gold, predicted, timeout) if gold else "0"
         correct = judge == "1"
@@ -499,6 +567,9 @@ def run_one_item(
         "question": question,
         "gold_answer": gold,
         "predicted_answer": predicted,
+        "original_predicted_answer": original_predicted if repaired else "",
+        "answer_repaired": repaired,
+        "answer_repair_error": repair_error,
         "judge": judge,
         "correct": correct,
         "mapping_score": score_anonymized_mappings(gold, predicted),

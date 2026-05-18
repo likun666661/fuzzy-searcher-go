@@ -187,6 +187,9 @@ Successful worker execution requires `output_path` to exist and parse as
       "question": "...",
       "gold_answer": "...",
       "predicted_answer": "...",
+      "original_predicted_answer": "...",
+      "answer_repaired": true,
+      "answer_repair_error": "",
       "judge": "1",
       "correct": true,
       "mapping_score": {
@@ -232,6 +235,15 @@ containment matching so answers like `洪信（即洪太尉）` can match `洪�
 `exact_matched_count` / `exact_recall` remain strict normalized string metrics.
 These metrics are advisory for generic benchmark jobs but should be preferred
 over a pure LLM judge when evaluating AnonyRAG entity restoration quality.
+
+For anonymized mapping tasks, the worker now asks the answer model to emit
+strict `ID——实体` lines. It then performs one formatting repair pass without
+looking at the gold answer: the repair prompt receives only the question,
+context, previous answer, and required anonymized IDs. `answer_repaired=true`
+means `predicted_answer` is the repaired final answer and
+`original_predicted_answer` keeps the first answer for audit. If the repair call
+fails, the job falls back to the first answer and stores `answer_repair_error`
+without failing the whole item.
 
 ## Inline Job Result
 
