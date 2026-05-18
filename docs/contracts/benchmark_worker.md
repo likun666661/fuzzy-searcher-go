@@ -105,6 +105,7 @@ Optional fields append:
 | `llm_base_url` | `--llm-base-url <url>` |
 | `graph_path` | `--graph <path>` |
 | `chunks_path` | `--chunks <path>` |
+| `corpus_path` | `--corpus <path>` |
 | `cache_dir` | `--cache-dir <path>` |
 | `schema_path` | `--schema <path>` |
 | `config_path` | `--config <path>` |
@@ -199,6 +200,7 @@ The full item-level result remains on disk as the `benchmark_result` artifact.
 Expected artifacts:
 
 - `qa`: input `qa_json`, status `configured`.
+- `corpus`: optional input `corpus_json`, status `configured`.
 - `graph`: optional input `graph_json`, status `configured`.
 - `chunks`: optional input `chunks_txt`, status `configured`.
 - `schema`: optional input `schema_json`, status `configured`.
@@ -314,4 +316,3 @@ Phase 26 validation should verify:
 - optional workflow mode can run benchmark alone or build_graph then benchmark.
 - existing release-check, service-smoke, demo-service-smoke, and job/workflow
   gates do not regress.
-

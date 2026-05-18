@@ -1,4 +1,4 @@
-.PHONY: test release-check service-run service-check service-local service-smoke demo-service-smoke demo-gates demo-gate-rerank
+.PHONY: test release-check service-run service-check service-local service-smoke demo-service-smoke benchmark-smoke demo-gates demo-gate-rerank
 
 test:
 	go test ./...
@@ -20,6 +20,9 @@ service-smoke:
 
 demo-service-smoke:
 	scripts/run_demo_service_smoke.sh
+
+benchmark-smoke:
+	scripts/run_anonyrag_benchmark_smoke.sh
 
 demo-gates:
 	scripts/run_demo_gates.sh

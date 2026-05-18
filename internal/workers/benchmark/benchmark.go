@@ -84,6 +84,7 @@ func Run(ctx context.Context, cfg Config, spec jobs.BenchmarkSpec) (*Result, err
 	appendString("--llm-base-url", spec.LLMBaseURL)
 	appendString("--graph", spec.GraphPath)
 	appendString("--chunks", spec.ChunksPath)
+	appendString("--corpus", spec.CorpusPath)
 	appendString("--cache-dir", spec.CacheDir)
 	appendString("--schema", spec.SchemaPath)
 	appendString("--config", spec.ConfigPath)

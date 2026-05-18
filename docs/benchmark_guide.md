@@ -335,7 +335,19 @@ python main.py \
 
 所以它已经能支撑“服务化 benchmark”的底层能力。
 
-但它还缺一个一键 batch benchmark 的上层对象。
+Phase 26 后它已经有第一版 `benchmark` job/workflow runner，并提供了一个
+小样本真实模型 smoke：
+
+```bash
+export LLM_API_KEY="${DEEPSEEK_API_KEY}"
+export LLM_BASE_URL="https://api.deepseek.com"
+export LLM_MODEL="deepseek-v4-pro"
+YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag make benchmark-smoke
+```
+
+默认跑 `anony_eng` 的 1 条 QA，通过 Go HTTP service 提交 `benchmark` job，
+由 Python worker 写出 `benchmark-result/v1`。这条命令是 smoke，不是论文
+全量跑分；全量 benchmark 需要显式调大 `BENCHMARK_LIMIT` 并关注 token 成本。
 
 Phase 26 的目标合同：
 

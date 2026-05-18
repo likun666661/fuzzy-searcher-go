@@ -77,6 +77,13 @@ SCRIPT_EXPECTATIONS = {
         "/v1/jobs",
         "real demo service smoke passed",
     ],
+    "scripts/run_anonyrag_benchmark_smoke.sh": [
+        "Usage: scripts/run_anonyrag_benchmark_smoke.sh",
+        "BENCHMARK_DATASET",
+        "scripts/prepare_anonyrag.py",
+        "/v1/jobs",
+        "AnonyRAG benchmark smoke passed",
+    ],
     ".env.example": [
         "YOUTU_RAG_PROFILE=demo",
         "YOUTU_RAG_ARTIFACT_ROOT=../youtu-graphrag",
@@ -135,6 +142,12 @@ def main() -> int:
     require(
         "scripts/run_demo_service_smoke.sh" in makefile,
         "demo-service-smoke must call scripts/run_demo_service_smoke.sh",
+        errors,
+    )
+    require("benchmark-smoke:" in makefile, "Makefile missing benchmark-smoke target", errors)
+    require(
+        "scripts/run_anonyrag_benchmark_smoke.sh" in makefile,
+        "benchmark-smoke must call scripts/run_anonyrag_benchmark_smoke.sh",
         errors,
     )
 

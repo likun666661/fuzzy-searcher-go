@@ -1098,6 +1098,17 @@ func benchmarkArtifacts(spec jobs.BenchmarkSpec) []jobs.Artifact {
 			Description: "Graph JSON consumed by the benchmark worker.",
 		})
 	}
+	if spec.CorpusPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "corpus",
+			Role:        "input",
+			Kind:        "corpus_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.CorpusPath,
+			Status:      "configured",
+			Description: "Corpus JSON consumed by the benchmark worker.",
+		})
+	}
 	if spec.ChunksPath != "" {
 		artifacts = append(artifacts, jobs.Artifact{
 			Name:        "chunks",

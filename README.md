@@ -534,8 +534,14 @@ For one-off dataset benchmark experiments, start with
 - The original Python `youtu-graphrag/main.py` remains the closest path to the
   paper-style dataset benchmark today because it already loops over QA pairs,
   generates answers, and runs the LLM judge.
-- This Go service has the building blocks for a durable benchmark service
-  feature, but it does not yet have a one-command batch `benchmark` job.
+- This Go service now has a durable `benchmark` job/workflow runner. After
+  preparing AnonyRAG, a tiny real-model smoke is:
+
+  ```bash
+  scripts/prepare_anonyrag.py --artifact-root /abs/path/youtu-graphrag
+  export LLM_API_KEY="${DEEPSEEK_API_KEY}"
+  YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag make benchmark-smoke
+  ```
 
 When using DeepSeek for answer/judge experiments, map the existing key into the
 Youtu-RAG environment names instead of writing secrets to disk:

@@ -141,15 +141,21 @@ func (r *Registry) schemaArtifact(name string) Artifact {
 }
 
 func (r *Registry) corpusPath(name string) string {
-	demoPath := filepath.Join(r.config.CorpusRoot, name, name+"_corpus.json")
-	if exists(demoPath, "file") {
-		return demoPath
+	candidates := []string{
+		filepath.Join(r.config.CorpusRoot, name, name+"_corpus.json"),
+		filepath.Join(r.config.CorpusRoot, name, "final_chunk_corpus.json"),
+		filepath.Join(r.config.CorpusRoot, name, "corpus.json"),
+	}
+	for _, path := range candidates {
+		if exists(path, "file") {
+			return path
+		}
 	}
 	uploadedPath := filepath.Join(r.config.CorpusRoot, "uploaded", name, "corpus.json")
 	if exists(uploadedPath, "file") {
 		return uploadedPath
 	}
-	return demoPath
+	return candidates[0]
 }
 
 func (r *Registry) graphPath(name string) string {
