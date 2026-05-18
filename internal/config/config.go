@@ -14,6 +14,7 @@ import (
 type Config struct {
 	AppName          string
 	Env              string
+	Profile          string
 	ServerVersion    string
 	HTTPAddr         string
 	DefaultDataset   string
@@ -42,6 +43,7 @@ type Config struct {
 	DatasetNames     []string
 	Path2Threshold   float64
 	ShutdownGrace    time.Duration
+	ValidateOnStart  bool
 }
 
 // Load reads service configuration from environment variables.
@@ -51,6 +53,7 @@ func Load() Config {
 	return Config{
 		AppName:          getenv("YOUTU_RAG_APP_NAME", "youtu-rag-service"),
 		Env:              getenv("YOUTU_RAG_ENV", "development"),
+		Profile:          getenv("YOUTU_RAG_PROFILE", "local"),
 		ServerVersion:    getenv("YOUTU_RAG_VERSION", "dev"),
 		HTTPAddr:         getenv("YOUTU_RAG_HTTP_ADDR", ":8080"),
 		DefaultDataset:   defaultDataset,
@@ -79,6 +82,7 @@ func Load() Config {
 		DatasetNames:     getenvList("YOUTU_RAG_DATASETS", []string{defaultDataset}),
 		Path2Threshold:   getenvFloat("YOUTU_RAG_PATH2_THRESHOLD", 0.1),
 		ShutdownGrace:    time.Duration(getenvInt("YOUTU_RAG_SHUTDOWN_SECONDS", 10)) * time.Second,
+		ValidateOnStart:  getenvBool("YOUTU_RAG_VALIDATE_ON_START", false),
 	}
 }
 
@@ -112,6 +116,21 @@ func getenvInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func getenvBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func getenvList(key string, fallback []string) []string {

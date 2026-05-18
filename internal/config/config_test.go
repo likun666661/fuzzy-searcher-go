@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -12,6 +13,7 @@ import (
 func TestLoadParsesServiceEnvironment(t *testing.T) {
 	t.Setenv("YOUTU_RAG_APP_NAME", "retriever-api")
 	t.Setenv("YOUTU_RAG_ENV", "test")
+	t.Setenv("YOUTU_RAG_PROFILE", "demo")
 	t.Setenv("YOUTU_RAG_VERSION", "v1")
 	t.Setenv("YOUTU_RAG_HTTP_ADDR", "127.0.0.1:0")
 	t.Setenv("YOUTU_RAG_DATASET", "demo")
@@ -22,9 +24,10 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	t.Setenv("YOUTU_RAG_DATASETS", " demo, news ,, legal ")
 	t.Setenv("YOUTU_RAG_PATH2_THRESHOLD", "0.25")
 	t.Setenv("YOUTU_RAG_SHUTDOWN_SECONDS", "3")
+	t.Setenv("YOUTU_RAG_VALIDATE_ON_START", "true")
 
 	cfg := config.Load()
-	if cfg.AppName != "retriever-api" || cfg.Env != "test" || cfg.ServerVersion != "v1" {
+	if cfg.AppName != "retriever-api" || cfg.Env != "test" || cfg.Profile != "demo" || cfg.ServerVersion != "v1" {
 		t.Fatalf("identity config = %#v", cfg)
 	}
 	if cfg.HTTPAddr != "127.0.0.1:0" || cfg.DefaultSidecar != "http://127.0.0.1:8765" {
@@ -41,6 +44,9 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	}
 	if cfg.ShutdownGrace != 3*time.Second {
 		t.Fatalf("shutdown grace = %v", cfg.ShutdownGrace)
+	}
+	if !cfg.ValidateOnStart {
+		t.Fatalf("validate on start = %v", cfg.ValidateOnStart)
 	}
 	if cfg.GraphRoot != filepath.Join("/tmp/youtu", "output", "graphs") {
 		t.Fatalf("graph root = %q", cfg.GraphRoot)
@@ -71,6 +77,54 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	}
 	if cfg.WorkerCWD != "/tmp/youtu" {
 		t.Fatalf("worker cwd = %q", cfg.WorkerCWD)
+	}
+}
+
+func TestValidateServiceConfigurationProfiles(t *testing.T) {
+	dir := t.TempDir()
+	python := filepath.Join(dir, "python")
+	golden := filepath.Join(dir, "generate.py")
+	parse := filepath.Join(dir, "parse.py")
+	build := filepath.Join(dir, "build.py")
+	answer := filepath.Join(dir, "answer.py")
+	graph := filepath.Join(dir, "output", "graphs", "demo_new.json")
+	chunks := filepath.Join(dir, "output", "chunks", "demo.txt")
+	for _, path := range []string{python, golden, parse, build, answer, graph, chunks} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	report := config.Validate(config.Config{
+		Profile:          "production",
+		HTTPAddr:         "127.0.0.1:0",
+		DefaultDataset:   "demo",
+		DefaultMode:      "native-path1-rerank",
+		DefaultSidecar:   "http://127.0.0.1:8765",
+		ArtifactRoot:     dir,
+		WorkerCWD:        dir,
+		PythonBin:        python,
+		GoldenScript:     golden,
+		ParseDocsScript:  parse,
+		BuildGraphScript: build,
+		AnswerScript:     answer,
+	})
+	if !report.Ready || report.SchemaVersion != config.ValidationSchemaVersion || report.Err() != nil {
+		t.Fatalf("report = %#v err=%v", report, report.Err())
+	}
+
+	failed := config.Validate(config.Config{
+		Profile:        "production",
+		HTTPAddr:       "127.0.0.1:0",
+		DefaultDataset: "demo",
+		DefaultMode:    "native-path1-rerank",
+		ArtifactRoot:   filepath.Join(dir, "missing"),
+	})
+	if failed.Ready || failed.Err() == nil {
+		t.Fatalf("failed report = %#v err=%v", failed, failed.Err())
 	}
 }
 

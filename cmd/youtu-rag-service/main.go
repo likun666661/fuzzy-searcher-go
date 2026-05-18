@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 	"os"
@@ -14,7 +16,28 @@ import (
 )
 
 func main() {
+	checkConfig := flag.Bool("check-config", false, "validate service configuration and print a JSON report")
+	flag.Parse()
+
 	cfg := config.Load()
+	if *checkConfig {
+		report := config.Validate(cfg)
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(report); err != nil {
+			log.Fatalf("encode config validation report: %v", err)
+		}
+		if !report.Ready {
+			os.Exit(2)
+		}
+		return
+	}
+	if cfg.ValidateOnStart {
+		report := config.Validate(cfg)
+		if err := report.Err(); err != nil {
+			log.Fatalf("%v", err)
+		}
+	}
 	service := svc.NewService(cfg)
 	server := &http.Server{
 		Addr:    cfg.HTTPAddr,
