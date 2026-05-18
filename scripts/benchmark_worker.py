@@ -13,10 +13,13 @@ import argparse
 import json
 import os
 import re
+import signal
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,6 +28,15 @@ from typing import Any
 SCHEMA_VERSION = "benchmark-result/v1"
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-v4-pro"
+STOP_REQUESTED = threading.Event()
+
+
+def handle_stop(_signum: int, _frame: Any) -> None:
+    STOP_REQUESTED.set()
+
+
+signal.signal(signal.SIGTERM, handle_stop)
+signal.signal(signal.SIGINT, handle_stop)
 
 
 def now_iso() -> str:
@@ -139,6 +151,8 @@ def api_key() -> str:
 
 
 def chat_completion(base_url: str, key: str, model: str, messages: list[dict[str, str]], timeout: float) -> str:
+    if STOP_REQUESTED.is_set():
+        raise RuntimeError("benchmark_canceled")
     req = urllib.request.Request(
         f"{base_url}/chat/completions",
         data=json.dumps(
@@ -256,10 +270,159 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--graph", default="")
     parser.add_argument("--chunks", default="")
     parser.add_argument("--corpus", default="")
+    parser.add_argument("--progress", default="")
+    parser.add_argument("--checkpoint", default="")
+    parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--rate-limit-rpm", type=int, default=0)
+    parser.add_argument("--checkpoint-every", type=int, default=1)
+    parser.add_argument("--max-failures", type=int, default=0)
+    parser.add_argument("--question-timeout", type=float, default=0)
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--cache-dir", default="")
     parser.add_argument("--schema", default="")
     parser.add_argument("--config", default="")
     return parser.parse_args()
+
+
+def write_json_atomic(path: str, payload: dict[str, Any]) -> None:
+    if not path:
+        return
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(target.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp, target)
+
+
+def append_jsonl(path: str, payload: dict[str, Any], lock: threading.Lock) -> None:
+    if not path:
+        return
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with lock:
+        with open(target, "a", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+            f.write("\n")
+
+
+def load_checkpoint(path: str) -> dict[str, dict[str, Any]]:
+    if not path or not os.path.exists(path):
+        return {}
+    completed: dict[str, dict[str, Any]] = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"benchmark_checkpoint_invalid: line {line_no}: {exc}") from exc
+            if item.get("schema_version") != "benchmark-checkpoint-item/v1":
+                raise SystemExit(f"benchmark_checkpoint_invalid: line {line_no}: unexpected schema")
+            item_id = str(item.get("id") or "")
+            if item_id:
+                completed[item_id] = item
+    return completed
+
+
+class RateLimiter:
+    def __init__(self, rpm: int) -> None:
+        self.interval = 60.0 / rpm if rpm > 0 else 0.0
+        self.next_at = 0.0
+        self.lock = threading.Lock()
+
+    def wait(self) -> None:
+        if self.interval <= 0:
+            return
+        with self.lock:
+            now = time.time()
+            wait_for = self.next_at - now
+            if wait_for > 0:
+                time.sleep(wait_for)
+                now = time.time()
+            self.next_at = now + self.interval
+
+
+def progress_payload(
+    args: argparse.Namespace,
+    total: int,
+    completed: int,
+    correct_count: int,
+    failed_count: int,
+    items: list[dict[str, Any]],
+    started_at: str,
+    status: str,
+    running: int = 0,
+    last_error: str = "",
+    checkpoint_path: str = "",
+) -> dict[str, Any]:
+    succeeded_count = completed - failed_count
+    return {
+        "schema_version": "benchmark-progress/v1",
+        "dataset": args.dataset,
+        "qa_path": args.qa,
+        "output_path": args.output,
+        "status": status,
+        "total": total,
+        "completed": completed,
+        "running": running,
+        "succeeded": succeeded_count,
+        "failed": failed_count,
+        "correct": correct_count,
+        "correct_count": correct_count,
+        "failed_count": failed_count,
+        "accuracy_so_far": (correct_count / succeeded_count) if succeeded_count else 0.0,
+        "concurrency": max(args.concurrency, 1),
+        "checkpoint_path": checkpoint_path,
+        "started_at": started_at,
+        "updated_at": now_iso(),
+        "last_error": last_error,
+        "items": items,
+    }
+
+
+def run_one_item(
+    row: dict[str, Any],
+    corpus: list[dict[str, str]],
+    args: argparse.Namespace,
+    base_url: str,
+    key: str,
+    answer_model: str,
+    judge_model: str,
+    timeout: float,
+    rate_limiter: RateLimiter,
+) -> dict[str, Any]:
+    item_start = time.time()
+    question = row["_question"]
+    gold = row["_answer"]
+    contexts = select_context(question, corpus, limit=min(max(args.top_k, 1), 6))
+    predicted = ""
+    judge = "0"
+    error = ""
+    try:
+        rate_limiter.wait()
+        predicted = answer_question(base_url, key, answer_model, question, contexts, timeout)
+        rate_limiter.wait()
+        judge = judge_answer(base_url, key, judge_model, question, gold, predicted, timeout) if gold else "0"
+        correct = judge == "1"
+    except Exception as exc:
+        error = str(exc)
+        correct = False
+    return {
+        "id": row["_id"],
+        "question": question,
+        "gold_answer": gold,
+        "predicted_answer": predicted,
+        "judge": judge,
+        "correct": correct,
+        "latency_ms": int((time.time() - item_start) * 1000),
+        "error": error,
+        "context_chunk_ids": [chunk["id"] for chunk in contexts],
+        "finished_at": now_iso(),
+    }
 
 
 def main() -> int:
@@ -273,54 +436,142 @@ def main() -> int:
     answer_model = model_name(args.answer_model)
     judge_model = model_name(args.judge_model)
     timeout = float(os.getenv("BENCHMARK_LLM_TIMEOUT_SECONDS", "60"))
+    if args.question_timeout > 0:
+        timeout = args.question_timeout
 
     qa_items = load_qa(args.qa)
     start = max(args.offset, 0)
     stop = len(qa_items) if args.limit <= 0 else min(len(qa_items), start + args.limit)
     selected = qa_items[start:stop]
+    resumed_by_id = load_checkpoint(args.checkpoint) if args.resume else {}
     corpus_path = args.corpus or infer_corpus_path(args.qa)
     corpus = load_corpus(corpus_path)
+    concurrency = max(args.concurrency, 1)
+    checkpoint_every = max(args.checkpoint_every, 1)
+    rate_limiter = RateLimiter(args.rate_limit_rpm)
 
     started_at = now_iso()
     started = time.time()
-    items: list[dict[str, Any]] = []
+    items_by_index: dict[int, dict[str, Any]] = {}
     correct_count = 0
     failed_count = 0
-
-    for row in selected:
-        item_start = time.time()
-        question = row["_question"]
-        gold = row["_answer"]
-        contexts = select_context(question, corpus, limit=min(max(args.top_k, 1), 6))
-        predicted = ""
-        judge = "0"
-        error = ""
-        try:
-            predicted = answer_question(base_url, key, answer_model, question, contexts, timeout)
-            judge = judge_answer(base_url, key, judge_model, question, gold, predicted, timeout) if gold else "0"
-            correct = judge == "1"
-        except Exception as exc:  # keep processing later rows while preserving diagnostics
-            error = str(exc)
-            correct = False
-            failed_count += 1
-        if correct:
+    completed = 0
+    lock = threading.Lock()
+    checkpoint_lock = threading.Lock()
+    for index, row in enumerate(selected):
+        resumed = resumed_by_id.get(row["_id"])
+        if not resumed:
+            continue
+        item = dict(resumed)
+        item.setdefault("question", row["_question"])
+        item.setdefault("gold_answer", row["_answer"])
+        item.setdefault("error", "")
+        items_by_index[index] = item
+        completed += 1
+        if item.get("correct") is True:
             correct_count += 1
-        items.append(
-            {
-                "id": row["_id"],
-                "question": question,
-                "gold_answer": gold,
-                "predicted_answer": predicted,
-                "judge": judge,
-                "correct": correct,
-                "latency_ms": int((time.time() - item_start) * 1000),
-                "error": error,
-                "context_chunk_ids": [chunk["id"] for chunk in contexts],
-            }
+        if item.get("error"):
+            failed_count += 1
+    write_json_atomic(
+        args.progress,
+        progress_payload(
+            args,
+            len(selected),
+            completed,
+            correct_count,
+            failed_count,
+            [items_by_index[i] for i in sorted(items_by_index)],
+            started_at,
+            "running",
+            running=min(concurrency, max(len(selected) - completed, 0)),
+            checkpoint_path=args.checkpoint,
+        ),
+    )
+
+    def record_done(index: int, item: dict[str, Any]) -> None:
+        nonlocal completed, correct_count, failed_count
+        with lock:
+            items_by_index[index] = item
+            completed += 1
+            if item.get("correct") is True:
+                correct_count += 1
+            if item.get("error"):
+                failed_count += 1
+            ordered = [items_by_index[i] for i in sorted(items_by_index)]
+            checkpoint_item = dict(item)
+            checkpoint_item["schema_version"] = "benchmark-checkpoint-item/v1"
+            checkpoint_item["index"] = index
+            append_jsonl(args.checkpoint, checkpoint_item, checkpoint_lock)
+            if completed % checkpoint_every == 0 or completed == len(selected):
+                write_json_atomic(
+                    args.progress,
+                    progress_payload(
+                        args,
+                        len(selected),
+                        completed,
+                        correct_count,
+                        failed_count,
+                        ordered,
+                        started_at,
+                        "running" if completed < len(selected) else "succeeded",
+                        running=max(min(concurrency, len(selected) - completed), 0),
+                        last_error=str(item.get("error") or ""),
+                        checkpoint_path=args.checkpoint,
+                    ),
+                )
+            if args.max_failures > 0 and failed_count > args.max_failures:
+                STOP_REQUESTED.set()
+
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = {
+            executor.submit(run_one_item, row, corpus, args, base_url, key, answer_model, judge_model, timeout, rate_limiter): index
+            for index, row in enumerate(selected)
+            if index not in items_by_index
+        }
+        for future in as_completed(futures):
+            if STOP_REQUESTED.is_set():
+                break
+            index = futures[future]
+            try:
+                item = future.result()
+            except Exception as exc:
+                row = selected[index]
+                item = {
+                    "id": row["_id"],
+                    "question": row["_question"],
+                    "gold_answer": row["_answer"],
+                    "predicted_answer": "",
+                    "judge": "0",
+                    "correct": False,
+                    "latency_ms": 0,
+                    "error": str(exc),
+                    "context_chunk_ids": [],
+                    "finished_at": now_iso(),
+                }
+            record_done(index, item)
+
+    if STOP_REQUESTED.is_set() and args.max_failures > 0 and failed_count > args.max_failures:
+        write_json_atomic(
+            args.progress,
+            progress_payload(
+                args,
+                len(selected),
+                completed,
+                correct_count,
+                failed_count,
+                [items_by_index[i] for i in sorted(items_by_index)],
+                started_at,
+                "failed",
+                last_error="benchmark_failure_budget_exceeded",
+                checkpoint_path=args.checkpoint,
+            ),
         )
+        print("benchmark_failure_budget_exceeded", file=sys.stderr)
+        return 3
 
     duration_ms = int((time.time() - started) * 1000)
     question_count = len(selected)
+    items = [items_by_index[i] for i in sorted(items_by_index)]
     result = {
         "schema_version": SCHEMA_VERSION,
         "dataset": args.dataset,
@@ -342,6 +593,7 @@ def main() -> int:
         "retrieval": {
             "mode": args.mode,
             "top_k": args.top_k,
+            "concurrency": concurrency,
             "context_source": "corpus_keyword_overlap" if corpus else "none",
             "graph_path": args.graph,
             "chunks_path": args.chunks,
@@ -355,6 +607,20 @@ def main() -> int:
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
         f.write("\n")
+    write_json_atomic(
+        args.progress,
+        progress_payload(
+            args,
+            question_count,
+            question_count,
+            correct_count,
+            failed_count,
+            items,
+            started_at,
+            "succeeded",
+            checkpoint_path=args.checkpoint,
+        ),
+    )
     print(json.dumps({"schema_version": "benchmark-worker-summary/v1", "output_path": args.output, "question_count": question_count, "accuracy": result["accuracy"]}, ensure_ascii=False))
     return 0
 

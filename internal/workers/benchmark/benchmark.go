@@ -31,6 +31,7 @@ type Result struct {
 	SchemaVersion string  `json:"schema_version"`
 	Dataset       string  `json:"dataset"`
 	OutputPath    string  `json:"output_path"`
+	ProgressPath  string  `json:"progress_path,omitempty"`
 	QuestionCount int     `json:"question_count"`
 	CorrectCount  int     `json:"correct_count"`
 	Accuracy      float64 `json:"accuracy"`
@@ -85,6 +86,16 @@ func Run(ctx context.Context, cfg Config, spec jobs.BenchmarkSpec) (*Result, err
 	appendString("--graph", spec.GraphPath)
 	appendString("--chunks", spec.ChunksPath)
 	appendString("--corpus", spec.CorpusPath)
+	appendString("--progress", spec.ProgressPath)
+	appendString("--checkpoint", spec.CheckpointPath)
+	appendInt("--concurrency", spec.Concurrency)
+	appendInt("--rate-limit-rpm", spec.RateLimitRPM)
+	appendInt("--checkpoint-every", spec.CheckpointEvery)
+	appendInt("--max-failures", spec.MaxFailures)
+	appendInt("--question-timeout", spec.QuestionTimeoutSeconds)
+	if spec.Resume {
+		args = append(args, "--resume")
+	}
 	appendString("--cache-dir", spec.CacheDir)
 	appendString("--schema", spec.SchemaPath)
 	appendString("--config", spec.ConfigPath)
@@ -109,6 +120,7 @@ func Run(ctx context.Context, cfg Config, spec jobs.BenchmarkSpec) (*Result, err
 		SchemaVersion: "benchmark-job-result/v1",
 		Dataset:       spec.Dataset,
 		OutputPath:    spec.OutputPath,
+		ProgressPath:  spec.ProgressPath,
 	}
 	err := cmd.Run()
 	result.Stdout = strings.TrimSpace(stdout.String())

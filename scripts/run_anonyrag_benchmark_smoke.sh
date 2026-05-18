@@ -14,6 +14,8 @@ Common overrides:
   YOUTU_RAG_HTTP_ADDR=127.0.0.1:18083
   BENCHMARK_DATASET=anony_eng
   BENCHMARK_LIMIT=1
+  BENCHMARK_CONCURRENCY=1
+  BENCHMARK_JOB_TIMEOUT_SECONDS=1800
   BENCHMARK_MODEL=deepseek-v4-pro
   LLM_API_KEY="${DEEPSEEK_API_KEY}"
 EOF
@@ -38,6 +40,8 @@ SERVICE_ADDR="${YOUTU_RAG_HTTP_ADDR:-127.0.0.1:18083}"
 SERVICE_URL="http://$SERVICE_ADDR"
 DATASET="${BENCHMARK_DATASET:-anony_eng}"
 LIMIT="${BENCHMARK_LIMIT:-1}"
+CONCURRENCY="${BENCHMARK_CONCURRENCY:-1}"
+JOB_TIMEOUT_SECONDS="${BENCHMARK_JOB_TIMEOUT_SECONDS:-1800}"
 MODEL="${BENCHMARK_MODEL:-${LLM_MODEL:-deepseek-v4-pro}}"
 BASE_URL="${BENCHMARK_LLM_BASE_URL:-${LLM_BASE_URL:-https://api.deepseek.com}}"
 OUT_DIR="${OUT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/youtu-rag-anonyrag-benchmark.XXXXXX")}"
@@ -56,6 +60,8 @@ CORPUS="$ROOT/data/$DATASET/final_chunk_corpus.json"
 SCHEMA="$ROOT/schemas/$DATASET.json"
 SCRIPT="$(pwd)/scripts/benchmark_worker.py"
 OUTPUT="${BENCHMARK_OUTPUT:-$ROOT/output/benchmarks/${DATASET}_${MODEL}_smoke.json}"
+PROGRESS="${BENCHMARK_PROGRESS:-${OUTPUT%.json}.progress.json}"
+CHECKPOINT="${BENCHMARK_CHECKPOINT:-${OUTPUT%.json}.checkpoint.jsonl}"
 
 require_file() {
   label="$1"
@@ -118,18 +124,20 @@ echo "qa: $QA" >&2
 echo "corpus: $CORPUS" >&2
 echo "service: $SERVICE_URL" >&2
 echo "output: $OUTPUT" >&2
+echo "progress: $PROGRESS" >&2
+echo "checkpoint: $CHECKPOINT" >&2
 
 go run ./cmd/youtu-rag-service > "$OUT_DIR/service.log" 2>&1 &
 SERVICE_PID="$!"
 
-python3 - "$SERVICE_URL" "$DATASET" "$QA" "$CORPUS" "$SCHEMA" "$OUTPUT" "$LIMIT" "$MODEL" "$BASE_URL" <<'PY'
+python3 - "$SERVICE_URL" "$DATASET" "$QA" "$CORPUS" "$SCHEMA" "$OUTPUT" "$PROGRESS" "$CHECKPOINT" "$LIMIT" "$CONCURRENCY" "$MODEL" "$BASE_URL" "$JOB_TIMEOUT_SECONDS" <<'PY'
 import json
 import sys
 import time
 import urllib.error
 import urllib.request
 
-base, dataset, qa, corpus, schema, output, limit, model, base_url = sys.argv[1:10]
+base, dataset, qa, corpus, schema, output, progress, checkpoint, limit, concurrency, model, base_url, job_timeout_seconds = sys.argv[1:14]
 
 
 def request(method, path, body=None, timeout=180):
@@ -166,7 +174,11 @@ created = request("POST", "/v1/jobs", {
         "corpus_path": corpus,
         "schema_path": schema,
         "output_path": output,
+        "progress_path": progress,
+        "checkpoint_path": checkpoint,
         "limit": int(limit),
+        "concurrency": int(concurrency),
+        "checkpoint_every": 1,
         "mode": "noagent",
         "top_k": 20,
         "answer_model": model,
@@ -175,8 +187,24 @@ created = request("POST", "/v1/jobs", {
     },
 }, timeout=30)
 job_id = created["id"]
-for _ in range(360):
+deadline = time.time() + int(job_timeout_seconds)
+last_completed = -1
+while time.time() < deadline:
     job = request("GET", f"/v1/jobs/{job_id}", timeout=20)
+    try:
+        with open(progress, "r", encoding="utf-8") as f:
+            current_progress = json.load(f)
+        completed = int(current_progress.get("completed") or 0)
+        if completed != last_completed:
+            last_completed = completed
+            print(json.dumps({
+                "progress": f"{completed}/{current_progress.get('total')}",
+                "correct": current_progress.get("correct_count"),
+                "failed": current_progress.get("failed_count"),
+                "accuracy_so_far": current_progress.get("accuracy_so_far"),
+            }, ensure_ascii=False))
+    except Exception:
+        pass
     if job["status"] in {"succeeded", "failed", "canceled"}:
         break
     time.sleep(1)

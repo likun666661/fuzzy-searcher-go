@@ -144,28 +144,36 @@ type AnswerSpec struct {
 
 // BenchmarkSpec is the typed job spec for Python dataset benchmark workers.
 type BenchmarkSpec struct {
-	Dataset      string `json:"dataset"`
-	QAPath       string `json:"qa_path"`
-	OutputPath   string `json:"output_path"`
-	Limit        int    `json:"limit,omitempty"`
-	Offset       int    `json:"offset,omitempty"`
-	Mode         string `json:"mode,omitempty"`
-	TopK         int    `json:"top_k,omitempty"`
-	AnswerModel  string `json:"answer_model,omitempty"`
-	JudgeModel   string `json:"judge_model,omitempty"`
-	LLMBaseURL   string `json:"llm_base_url,omitempty"`
-	GraphPath    string `json:"graph_path,omitempty"`
-	ChunksPath   string `json:"chunks_path,omitempty"`
-	CacheDir     string `json:"cache_dir,omitempty"`
-	SchemaPath   string `json:"schema_path,omitempty"`
-	ConfigPath   string `json:"config_path,omitempty"`
-	PythonBin    string `json:"python_bin,omitempty"`
-	ScriptPath   string `json:"script_path,omitempty"`
-	WorkingDir   string `json:"working_dir,omitempty"`
-	BuildFirst   bool   `json:"build_first,omitempty"`
-	BuildMode    string `json:"build_mode,omitempty"`
-	CorpusPath   string `json:"corpus_path,omitempty"`
-	BuildGraphID string `json:"build_graph_job_id,omitempty"`
+	Dataset                string `json:"dataset"`
+	QAPath                 string `json:"qa_path"`
+	OutputPath             string `json:"output_path"`
+	ProgressPath           string `json:"progress_path,omitempty"`
+	CheckpointPath         string `json:"checkpoint_path,omitempty"`
+	Limit                  int    `json:"limit,omitempty"`
+	Offset                 int    `json:"offset,omitempty"`
+	Concurrency            int    `json:"concurrency,omitempty"`
+	RateLimitRPM           int    `json:"rate_limit_rpm,omitempty"`
+	CheckpointEvery        int    `json:"checkpoint_every,omitempty"`
+	MaxFailures            int    `json:"max_failures,omitempty"`
+	QuestionTimeoutSeconds int    `json:"question_timeout_seconds,omitempty"`
+	Resume                 bool   `json:"resume,omitempty"`
+	Mode                   string `json:"mode,omitempty"`
+	TopK                   int    `json:"top_k,omitempty"`
+	AnswerModel            string `json:"answer_model,omitempty"`
+	JudgeModel             string `json:"judge_model,omitempty"`
+	LLMBaseURL             string `json:"llm_base_url,omitempty"`
+	GraphPath              string `json:"graph_path,omitempty"`
+	ChunksPath             string `json:"chunks_path,omitempty"`
+	CacheDir               string `json:"cache_dir,omitempty"`
+	SchemaPath             string `json:"schema_path,omitempty"`
+	ConfigPath             string `json:"config_path,omitempty"`
+	PythonBin              string `json:"python_bin,omitempty"`
+	ScriptPath             string `json:"script_path,omitempty"`
+	WorkingDir             string `json:"working_dir,omitempty"`
+	BuildFirst             bool   `json:"build_first,omitempty"`
+	BuildMode              string `json:"build_mode,omitempty"`
+	CorpusPath             string `json:"corpus_path,omitempty"`
+	BuildGraphID           string `json:"build_graph_job_id,omitempty"`
 }
 
 // Runner is the unit of work executed by the manager.
@@ -317,6 +325,13 @@ func (r *Recorder) Event(eventType, message string) {
 // Artifact updates the status/path for one named job artifact.
 func (r *Recorder) Artifact(name, status, path string) {
 	r.manager.updateArtifact(r.jobID, name, status, path)
+}
+
+// Progress records a benchmark_progress event and updates the checkpoint
+// artifact. The progress payload is kept in the message as compact JSON so the
+// existing event contract remains backwards-compatible.
+func (r *Recorder) Progress(message string) {
+	r.manager.addEvent(r.jobID, "benchmark_progress", message, "")
 }
 
 func (m *Manager) run(ctx context.Context, id string, runner Runner) {

@@ -24,6 +24,14 @@ dataset = sys.argv[sys.argv.index("--dataset") + 1]
 qa = sys.argv[sys.argv.index("--qa") + 1]
 assert "--limit" in sys.argv
 assert "--answer-model" in sys.argv
+assert "--progress" in sys.argv
+assert "--checkpoint" in sys.argv
+assert "--concurrency" in sys.argv
+assert "--rate-limit-rpm" in sys.argv
+assert "--checkpoint-every" in sys.argv
+assert "--max-failures" in sys.argv
+assert "--question-timeout" in sys.argv
+assert "--resume" in sys.argv
 os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w", encoding="utf-8") as f:
     json.dump({
@@ -43,21 +51,29 @@ print(json.dumps({"ok": True, "output": out}))
 		ScriptPath: script,
 		WorkingDir: dir,
 	}, jobs.BenchmarkSpec{
-		Dataset:     "anony_eng",
-		QAPath:      filepath.Join(dir, "qa.json"),
-		OutputPath:  output,
-		Limit:       2,
-		Offset:      1,
-		Mode:        "noagent",
-		TopK:        20,
-		AnswerModel: "deepseek-v4-pro",
-		JudgeModel:  "deepseek-v4-pro",
-		LLMBaseURL:  "https://api.deepseek.com",
-		GraphPath:   filepath.Join(dir, "graph.json"),
-		ChunksPath:  filepath.Join(dir, "chunks.txt"),
-		SchemaPath:  filepath.Join(dir, "schema.json"),
-		CacheDir:    filepath.Join(dir, "cache"),
-		ConfigPath:  "config/base_config.yaml",
+		Dataset:                "anony_eng",
+		QAPath:                 filepath.Join(dir, "qa.json"),
+		OutputPath:             output,
+		ProgressPath:           filepath.Join(dir, "out", "benchmark.progress.json"),
+		CheckpointPath:         filepath.Join(dir, "out", "benchmark.checkpoint.jsonl"),
+		Limit:                  2,
+		Offset:                 1,
+		Concurrency:            3,
+		RateLimitRPM:           60,
+		CheckpointEvery:        1,
+		MaxFailures:            2,
+		QuestionTimeoutSeconds: 30,
+		Resume:                 true,
+		Mode:                   "noagent",
+		TopK:                   20,
+		AnswerModel:            "deepseek-v4-pro",
+		JudgeModel:             "deepseek-v4-pro",
+		LLMBaseURL:             "https://api.deepseek.com",
+		GraphPath:              filepath.Join(dir, "graph.json"),
+		ChunksPath:             filepath.Join(dir, "chunks.txt"),
+		SchemaPath:             filepath.Join(dir, "schema.json"),
+		CacheDir:               filepath.Join(dir, "cache"),
+		ConfigPath:             "config/base_config.yaml",
 	})
 	if err != nil {
 		t.Fatalf("run worker: %v", err)

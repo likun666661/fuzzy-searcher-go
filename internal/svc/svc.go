@@ -1020,6 +1020,18 @@ func (s *Service) benchmarkSpec(input jobs.BenchmarkSpec) jobs.BenchmarkSpec {
 	if spec.OutputPath == "" {
 		spec.OutputPath = filepath.Join(s.config.ArtifactRoot, "output", "benchmarks", spec.Dataset+".json")
 	}
+	if spec.ProgressPath == "" {
+		spec.ProgressPath = strings.TrimSuffix(spec.OutputPath, filepath.Ext(spec.OutputPath)) + ".progress.json"
+	}
+	if spec.CheckpointPath == "" {
+		spec.CheckpointPath = strings.TrimSuffix(spec.OutputPath, filepath.Ext(spec.OutputPath)) + ".checkpoint.jsonl"
+	}
+	if spec.Concurrency <= 0 {
+		spec.Concurrency = 1
+	}
+	if spec.CheckpointEvery <= 0 {
+		spec.CheckpointEvery = 1
+	}
 	if spec.Mode == "" {
 		spec.Mode = s.config.DefaultMode
 	}
@@ -1058,6 +1070,13 @@ func (s *Service) submitBenchmarkJob(spec jobs.BenchmarkSpec) jobs.Job {
 	return s.jobs.SubmitSpec(jobs.TypeBenchmark, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
 		recorder.Event("worker_started", "benchmark Python worker started")
 		recorder.Artifact("benchmark_result", "running", "")
+		recorder.Artifact("benchmark_progress", "running", spec.ProgressPath)
+		recorder.Artifact("benchmark_checkpoint", "running", spec.CheckpointPath)
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		if spec.ProgressPath != "" {
+			go s.watchBenchmarkProgress(ctx, recorder, spec.ProgressPath)
+		}
 		result, err := benchmark.Run(ctx, benchmark.Config{
 			PythonBin:  spec.PythonBin,
 			ScriptPath: spec.ScriptPath,
@@ -1065,14 +1084,43 @@ func (s *Service) submitBenchmarkJob(spec jobs.BenchmarkSpec) jobs.Job {
 		}, spec)
 		if err == nil {
 			recorder.Artifact("benchmark_result", "written", result.OutputPath)
+			recorder.Artifact("benchmark_progress", "written", result.ProgressPath)
+			recorder.Artifact("benchmark_checkpoint", "written", spec.CheckpointPath)
 			recorder.Event("artifact_benchmark_written", "benchmark result artifact written")
 		} else if errors.Is(err, benchmark.ErrMissingOutput) {
 			recorder.Artifact("benchmark_result", "missing", "")
+			recorder.Artifact("benchmark_progress", "failed", spec.ProgressPath)
+			recorder.Artifact("benchmark_checkpoint", "failed", spec.CheckpointPath)
 		} else {
 			recorder.Artifact("benchmark_result", "failed", "")
+			recorder.Artifact("benchmark_progress", "failed", spec.ProgressPath)
+			recorder.Artifact("benchmark_checkpoint", "failed", spec.CheckpointPath)
 		}
 		return result, err
 	})
+}
+
+func (s *Service) watchBenchmarkProgress(ctx context.Context, recorder *jobs.Recorder, path string) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	lastMessage := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			body, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			message := strings.TrimSpace(string(body))
+			if message == "" || message == lastMessage {
+				continue
+			}
+			lastMessage = message
+			recorder.Progress(message)
+		}
+	}
 }
 
 func benchmarkArtifacts(spec jobs.BenchmarkSpec) []jobs.Artifact {
@@ -1152,6 +1200,30 @@ func benchmarkArtifacts(spec jobs.BenchmarkSpec) []jobs.Artifact {
 		Status:        "pending",
 		Description:   "Benchmark result JSON written by the benchmark worker.",
 	})
+	if spec.ProgressPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:          "benchmark_progress",
+			Role:          "output",
+			Kind:          "benchmark_progress_json",
+			SchemaVersion: "benchmark-progress/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.ProgressPath,
+			Status:        "pending",
+			Description:   "Incremental benchmark progress JSON written by the benchmark worker.",
+		})
+	}
+	if spec.CheckpointPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:          "benchmark_checkpoint",
+			Role:          "output",
+			Kind:          "benchmark_checkpoint_jsonl",
+			SchemaVersion: "benchmark-checkpoint-item/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.CheckpointPath,
+			Status:        "pending",
+			Description:   "Append-only benchmark checkpoint JSONL written by the benchmark worker.",
+		})
+	}
 	return artifacts
 }
 
