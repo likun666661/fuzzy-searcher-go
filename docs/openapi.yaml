@@ -1,0 +1,1260 @@
+openapi: 3.1.0
+info:
+  title: Youtu-RAG Go Service API
+  version: 0.24.0
+  description: >
+    Release-surface contract for the long-running Youtu-RAG Go service.
+    Go owns HTTP, dataset, job, workflow, artifact, operation, and sidecar
+    orchestration. Python remains the worker/sidecar layer for model-heavy
+    parsing, graph construction, retrieval primitives, reranking, and answer
+    generation.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local service
+tags:
+  - name: health
+  - name: datasets
+  - name: schemas
+  - name: operations
+  - name: sidecars
+  - name: retrieval
+  - name: jobs
+  - name: workflows
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      operationId: getHealth
+      summary: Process liveness.
+      responses:
+        "200":
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /readyz:
+    get:
+      tags: [health]
+      operationId: getReady
+      summary: Configured dataset and dependency readiness.
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+        "503":
+          description: Not ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+  /v1/version:
+    get:
+      tags: [health]
+      operationId: getVersion
+      summary: Service version metadata.
+      responses:
+        "200":
+          description: Version metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [app, version]
+                properties:
+                  app:
+                    type: string
+                  version:
+                    type: string
+  /v1/datasets:
+    get:
+      tags: [datasets]
+      operationId: listDatasets
+      summary: List datasets discovered by the artifact registry.
+      responses:
+        "200":
+          description: Dataset list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [datasets]
+                properties:
+                  datasets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Dataset"
+  /v1/datasets/import:
+    post:
+      tags: [datasets]
+      operationId: importDataset
+      summary: Import prepared corpus and schema into managed artifact roots.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetImportRequest"
+      responses:
+        "201":
+          description: Dataset imported.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetImportResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /v1/datasets/{dataset}:
+    parameters:
+      - $ref: "#/components/parameters/DatasetName"
+    get:
+      tags: [datasets]
+      operationId: getDataset
+      summary: Get one dataset registry snapshot.
+      responses:
+        "200":
+          description: Dataset snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "400":
+          $ref: "#/components/responses/Error"
+    delete:
+      tags: [datasets]
+      operationId: deleteDataset
+      summary: Delete a managed dataset and selected managed artifacts.
+      parameters:
+        - name: include_outputs
+          in: query
+          schema:
+            type: boolean
+            default: true
+        - name: dry_run
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: force
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Delete result or dry-run plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetDeleteResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /v1/datasets/{dataset}/artifacts:
+    parameters:
+      - $ref: "#/components/parameters/DatasetName"
+    get:
+      tags: [datasets]
+      operationId: listDatasetArtifacts
+      summary: List artifact metadata for one dataset.
+      responses:
+        "200":
+          description: Dataset artifacts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dataset, artifacts]
+                properties:
+                  dataset:
+                    type: string
+                  artifacts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Artifact"
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/datasets/{dataset}/rebuild:
+    parameters:
+      - $ref: "#/components/parameters/DatasetName"
+    post:
+      tags: [datasets]
+      operationId: rebuildDataset
+      summary: Clean selected build outputs and submit a build_graph job.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetRebuildRequest"
+      responses:
+        "200":
+          description: Dry-run rebuild plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetRebuildResult"
+        "202":
+          description: Build job submitted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetRebuildResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /v1/schemas:
+    get:
+      tags: [schemas]
+      operationId: listSchemas
+      summary: List managed schema records.
+      responses:
+        "200":
+          description: Managed schema list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema_version, count, schemas]
+                properties:
+                  schema_version:
+                    const: schema-management-list/v1
+                  count:
+                    type: integer
+                  schemas:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DatasetSchema"
+        "500":
+          $ref: "#/components/responses/Error"
+  /v1/schemas/validate:
+    post:
+      tags: [schemas]
+      operationId: validateSchema
+      summary: Validate schema JSON without writing artifacts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [schema]
+              properties:
+                schema:
+                  $ref: "#/components/schemas/YoutuSchema"
+      responses:
+        "200":
+          description: Schema is valid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchemaValidationResult"
+        "400":
+          description: Schema is invalid.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - type: object
+                    properties:
+                      result:
+                        $ref: "#/components/schemas/SchemaValidationResult"
+  /v1/datasets/{dataset}/schema:
+    parameters:
+      - $ref: "#/components/parameters/DatasetName"
+    get:
+      tags: [schemas]
+      operationId: getDatasetSchema
+      summary: Read a dataset schema or default fallback.
+      parameters:
+        - name: include_body
+          in: query
+          schema:
+            type: boolean
+            default: true
+        - name: allow_fallback
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: Schema record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetSchema"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    put:
+      tags: [schemas]
+      operationId: putDatasetSchema
+      summary: Upload or replace a dataset-specific schema.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutDatasetSchemaRequest"
+      responses:
+        "200":
+          description: Schema written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetSchemaUpdate"
+        "400":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /v1/dataset-operations:
+    get:
+      tags: [operations]
+      operationId: listDatasetOperations
+      summary: List dataset operation history records.
+      responses:
+        "200":
+          description: Operation list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetOperationList"
+  /v1/dataset-operations/{operation_id}:
+    parameters:
+      - name: operation_id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [operations]
+      operationId: getDatasetOperation
+      summary: Get one dataset operation record.
+      responses:
+        "200":
+          description: Operation record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetOperation"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/datasets/{dataset}/operations:
+    parameters:
+      - $ref: "#/components/parameters/DatasetName"
+    get:
+      tags: [operations]
+      operationId: listDatasetOperationsForDataset
+      summary: List operation history for one dataset.
+      responses:
+        "200":
+          description: Dataset-scoped operation list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DatasetOperationList"
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/sidecars:
+    get:
+      tags: [sidecars]
+      operationId: listSidecars
+      summary: List configured sidecars and health snapshots.
+      responses:
+        "200":
+          description: Sidecar list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sidecars]
+                properties:
+                  sidecars:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SidecarStatus"
+  /v1/sidecars/vector/health:
+    get:
+      tags: [sidecars]
+      operationId: getVectorSidecarHealth
+      summary: Check Python vector sidecar health for a dataset.
+      parameters:
+        - name: dataset
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Sidecar is configured and reachable, or unconfigured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SidecarStatus"
+        "503":
+          description: Sidecar is configured but unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SidecarStatus"
+  /v1/retrieve:
+    post:
+      tags: [retrieval]
+      operationId: retrieve
+      summary: Run synchronous retrieval.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetrieveRequest"
+      responses:
+        "200":
+          description: Retrieve result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetrieveResult"
+        "400":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+  /v1/jobs:
+    post:
+      tags: [jobs]
+      operationId: createJob
+      summary: Submit an async service job.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateJobRequest"
+      responses:
+        "202":
+          description: Job accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceJob"
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/jobs/{job_id}:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    get:
+      tags: [jobs]
+      operationId: getJob
+      summary: Get a job record.
+      responses:
+        "200":
+          description: Job record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceJob"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/jobs/{job_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    get:
+      tags: [jobs]
+      operationId: getJobEvents
+      summary: Get job lifecycle events.
+      responses:
+        "200":
+          description: Job events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, events]
+                properties:
+                  job_id:
+                    type: string
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/jobs/{job_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/JobID"
+    post:
+      tags: [jobs]
+      operationId: cancelJob
+      summary: Request job cancellation.
+      responses:
+        "200":
+          description: Updated job record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceJob"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/workflows:
+    get:
+      tags: [workflows]
+      operationId: listWorkflows
+      summary: List workflow records.
+      responses:
+        "200":
+          description: Workflow list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema_version, count, workflows]
+                properties:
+                  schema_version:
+                    const: workflow-list/v1
+                  count:
+                    type: integer
+                  workflows:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Workflow"
+    post:
+      tags: [workflows]
+      operationId: createWorkflow
+      summary: Submit a product workflow.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkflowRequest"
+      responses:
+        "202":
+          description: Workflow accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+        "400":
+          $ref: "#/components/responses/Error"
+  /v1/workflows/{workflow_id}:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    get:
+      tags: [workflows]
+      operationId: getWorkflow
+      summary: Get a workflow record.
+      responses:
+        "200":
+          description: Workflow record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/workflows/{workflow_id}/steps:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    get:
+      tags: [workflows]
+      operationId: getWorkflowSteps
+      summary: List workflow steps.
+      responses:
+        "200":
+          description: Workflow steps.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [schema_version, workflow_id, count, steps]
+                properties:
+                  schema_version:
+                    const: workflow-steps/v1
+                  workflow_id:
+                    type: string
+                  count:
+                    type: integer
+                  steps:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkflowStep"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/workflows/{workflow_id}/steps/{step_name}:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+      - name: step_name
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [workflows]
+      operationId: getWorkflowStep
+      summary: Get one workflow step.
+      responses:
+        "200":
+          description: Workflow step.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowStep"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/workflows/{workflow_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    get:
+      tags: [workflows]
+      operationId: getWorkflowEvents
+      summary: Get workflow events.
+      responses:
+        "200":
+          description: Workflow events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workflow_id, events]
+                properties:
+                  workflow_id:
+                    type: string
+                  events:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/workflows/{workflow_id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/WorkflowID"
+    post:
+      tags: [workflows]
+      operationId: cancelWorkflow
+      summary: Request workflow cancellation.
+      responses:
+        "200":
+          description: Updated workflow record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workflow"
+        "404":
+          $ref: "#/components/responses/Error"
+components:
+  parameters:
+    DatasetName:
+      name: dataset
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+    JobID:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        type: string
+    WorkflowID:
+      name: workflow_id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Error:
+      description: Stable error envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+    HealthResponse:
+      type: object
+      required: [status, app, env, version, time]
+      properties:
+        status:
+          const: ok
+        app:
+          type: string
+        env:
+          type: string
+        version:
+          type: string
+        time:
+          type: string
+          format: date-time
+    ReadyResponse:
+      type: object
+      required: [ready, checks]
+      properties:
+        ready:
+          type: boolean
+        checks:
+          type: object
+          additionalProperties: true
+    Artifact:
+      type: object
+      properties:
+        name:
+          type: string
+        role:
+          type: string
+        kind:
+          type: string
+        schema_version:
+          type: string
+        dataset:
+          type: string
+        path:
+          type: string
+        status:
+          type: string
+        description:
+          type: string
+        hash:
+          type: string
+        version:
+          type: integer
+        fallback:
+          type: boolean
+      additionalProperties: true
+    Dataset:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+        retrieval_ready:
+          type: boolean
+        missing_retrieval_artifacts:
+          type: array
+          items:
+            type: string
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+      additionalProperties: true
+    YoutuSchema:
+      type: object
+      required: [Nodes, Relations, Attributes]
+      properties:
+        Nodes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+        Relations:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+        Attributes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+      additionalProperties: true
+    SchemaSummary:
+      type: object
+      properties:
+        nodes:
+          type: integer
+        relations:
+          type: integer
+        attributes:
+          type: integer
+    DatasetSchema:
+      type: object
+      required: [schema_version, dataset, status, fallback, summary]
+      properties:
+        schema_version:
+          const: dataset-schema/v1
+        dataset:
+          type: string
+        status:
+          enum: [ready, fallback, missing, invalid]
+        path:
+          type: string
+        fallback:
+          type: boolean
+        version:
+          type: integer
+        hash:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        summary:
+          $ref: "#/components/schemas/SchemaSummary"
+        schema:
+          $ref: "#/components/schemas/YoutuSchema"
+      additionalProperties: true
+    PutDatasetSchemaRequest:
+      type: object
+      required: [schema]
+      properties:
+        schema:
+          $ref: "#/components/schemas/YoutuSchema"
+        overwrite:
+          type: boolean
+          default: false
+        source_path:
+          type: string
+    DatasetSchemaUpdate:
+      type: object
+      required: [schema_version, dataset, status, path, version, hash, artifacts]
+      properties:
+        schema_version:
+          const: dataset-schema-update/v1
+        dataset:
+          type: string
+        status:
+          const: written
+        path:
+          type: string
+        version:
+          type: integer
+        hash:
+          type: string
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+      additionalProperties: true
+    SchemaValidationResult:
+      type: object
+      required: [schema_version, valid, summary, errors]
+      properties:
+        schema_version:
+          const: schema-validation/v1
+        valid:
+          type: boolean
+        summary:
+          $ref: "#/components/schemas/SchemaSummary"
+        errors:
+          type: array
+          items:
+            type: string
+    DatasetImportRequest:
+      type: object
+      required: [dataset, corpus_path, schema_path]
+      properties:
+        dataset:
+          type: string
+        corpus_path:
+          type: string
+        schema_path:
+          type: string
+        overwrite:
+          type: boolean
+          default: false
+    DatasetImportResult:
+      type: object
+      required: [schema_version, dataset, status, artifacts]
+      properties:
+        schema_version:
+          const: dataset-import/v1
+        dataset:
+          type: string
+        status:
+          type: string
+        imported_at:
+          type: string
+          format: date-time
+        source:
+          type: object
+          additionalProperties: true
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+      additionalProperties: true
+    DatasetDeleteResult:
+      type: object
+      required: [schema_version, dataset, status, dry_run, include_outputs, artifacts]
+      properties:
+        schema_version:
+          const: dataset-delete/v1
+        dataset:
+          type: string
+        status:
+          type: string
+        dry_run:
+          type: boolean
+        include_outputs:
+          type: boolean
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        errors:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+    DatasetRebuildRequest:
+      type: object
+      properties:
+        dry_run:
+          type: boolean
+          default: false
+        overwrite_outputs:
+          type: boolean
+          default: true
+        build_graph:
+          type: object
+          additionalProperties: true
+    DatasetRebuildResult:
+      type: object
+      required: [schema_version, dataset, status, dry_run, overwrite_outputs, artifacts]
+      properties:
+        schema_version:
+          const: dataset-rebuild/v1
+        dataset:
+          type: string
+        status:
+          type: string
+        dry_run:
+          type: boolean
+        overwrite_outputs:
+          type: boolean
+        job_id:
+          type: string
+        job_type:
+          type: string
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+      additionalProperties: true
+    DatasetOperation:
+      type: object
+      required: [schema_version, id, dataset, type, status, created_at]
+      properties:
+        schema_version:
+          const: dataset-operation/v1
+        id:
+          type: string
+        dataset:
+          type: string
+        type:
+          enum: [import, create_dataset, rebuild, delete, schema_update]
+        status:
+          enum: [planned, running, succeeded, failed, canceled]
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        request:
+          type: object
+          additionalProperties: true
+        job_refs:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        workflow_refs:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        error:
+          type: string
+        result:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    DatasetOperationList:
+      type: object
+      required: [schema_version, count, operations]
+      properties:
+        schema_version:
+          const: dataset-operation-list/v1
+        count:
+          type: integer
+        dataset:
+          type: string
+        operations:
+          type: array
+          items:
+            $ref: "#/components/schemas/DatasetOperation"
+    SidecarStatus:
+      type: object
+      properties:
+        name:
+          type: string
+        configured:
+          type: boolean
+        reachable:
+          type: boolean
+        url:
+          type: string
+        dataset:
+          type: string
+        error:
+          type: string
+      additionalProperties: true
+    RetrieveRequest:
+      type: object
+      required: [dataset, question]
+      properties:
+        dataset:
+          type: string
+        question:
+          type: string
+        top_k:
+          type: integer
+          default: 20
+        mode:
+          type: string
+        graph_path:
+          type: string
+        chunks_path:
+          type: string
+        sidecar_url:
+          type: string
+        path2_threshold:
+          type: number
+    RetrieveResult:
+      type: object
+      required: [triples, chunk_ids, chunk_contents, debug]
+      properties:
+        triples:
+          type: array
+          items:
+            type: string
+        chunk_ids:
+          type: array
+          items:
+            type: string
+        chunk_contents:
+          type: array
+          items:
+            type: string
+        chunk_retrieval_results:
+          type: array
+          items:
+            type: string
+        debug:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    CreateJobRequest:
+      oneOf:
+        - type: object
+          required: [type, retrieve]
+          properties:
+            type:
+              const: retrieve
+            retrieve:
+              $ref: "#/components/schemas/RetrieveRequest"
+        - type: object
+          required: [type, parse_documents]
+          properties:
+            type:
+              const: parse_documents
+            parse_documents:
+              type: object
+              additionalProperties: true
+        - type: object
+          required: [type, generate_golden]
+          properties:
+            type:
+              const: generate_golden
+            generate_golden:
+              type: object
+              additionalProperties: true
+        - type: object
+          required: [type, build_graph]
+          properties:
+            type:
+              const: build_graph
+            build_graph:
+              type: object
+              additionalProperties: true
+        - type: object
+          required: [type, answer]
+          properties:
+            type:
+              const: answer
+            answer:
+              type: object
+              additionalProperties: true
+    ServiceJob:
+      type: object
+      required: [schema_version, id, type, status, spec, artifacts, created_at]
+      properties:
+        schema_version:
+          const: service-job/v1
+        id:
+          type: string
+        type:
+          enum: [retrieve, parse_documents, generate_golden, build_graph, answer]
+        status:
+          enum: [queued, running, succeeded, failed, canceled]
+        spec:
+          type: object
+          additionalProperties: true
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+        result:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    CreateWorkflowRequest:
+      oneOf:
+        - type: object
+          required: [type, build_and_answer]
+          properties:
+            type:
+              const: build_and_answer
+            build_and_answer:
+              type: object
+              additionalProperties: true
+        - type: object
+          required: [type, create_dataset]
+          properties:
+            type:
+              const: create_dataset
+            create_dataset:
+              type: object
+              additionalProperties: true
+    Workflow:
+      type: object
+      required: [schema_version, id, type, status, spec, steps, artifacts, created_at]
+      properties:
+        schema_version:
+          const: workflow/v1
+        id:
+          type: string
+        type:
+          enum: [build_and_answer, create_dataset]
+        status:
+          enum: [queued, running, succeeded, failed, canceled]
+        spec:
+          type: object
+          additionalProperties: true
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowStep"
+        artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+        result:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    WorkflowStep:
+      type: object
+      required: [name, type, status]
+      properties:
+        name:
+          type: string
+        job_id:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        input_artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        output_artifacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Artifact"
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+      additionalProperties: true
+    Event:
+      type: object
+      properties:
+        time:
+          type: string
+          format: date-time
+        type:
+          type: string
+        message:
+          type: string
+        status:
+          type: string
+      additionalProperties: true

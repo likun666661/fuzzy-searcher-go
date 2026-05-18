@@ -36,6 +36,8 @@ These tests exercise HTTP handlers as clients see them.
 Required coverage:
 
 - `/healthz`, `/readyz`, `/v1/version`.
+- `docs/openapi.yaml` parses successfully and includes every public route from
+  `internal/svc.Service.Routes`.
 - Service profile validation via `service-config-check/v1`, including missing
   artifact, worker, and sidecar diagnostics.
 - `/v1/retrieve` validation, supported modes, unsupported modes.

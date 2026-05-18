@@ -42,7 +42,9 @@ For the next service-oriented Youtu-RAG roadmap, read
 `docs/youtu_rag_service_plan.md`. For the latest gap map against the original
 Python repo and the workflow orchestration plan, read
 `docs/youtu_rag_gap_map.md`. For the service testing track, read
-`docs/service_test_strategy.md`.
+`docs/service_test_strategy.md`. The machine-readable HTTP release surface is
+tracked in `docs/openapi.yaml`, with release notes in
+`docs/release_surface.md`.
 
 ## Test
 
@@ -125,6 +127,20 @@ YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag \
 YOUTU_RAG_SIDECAR_URL=http://127.0.0.1:8765 \
 make service-local
 ```
+
+For a self-contained service smoke test that does not require the Python
+sidecar or model-heavy workers, run:
+
+```bash
+make service-smoke
+```
+
+The smoke script creates a temporary tiny artifact root, validates startup
+configuration, starts the Go service on `127.0.0.1:18080`, and exercises
+health/ready, dataset/artifact registry, schema validation/update, dataset
+import, retrieve, async retrieve job, and job events. Use
+`SMOKE_ADDR=127.0.0.1:18081` to avoid a local port conflict, or
+`KEEP_SMOKE_ARTIFACTS=1` to inspect the generated fixture files and service log.
 
 Set `YOUTU_RAG_VALIDATE_ON_START=true` to make `make service-run` fail before
 binding HTTP when the current profile is not ready.
