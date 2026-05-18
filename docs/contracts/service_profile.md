@@ -132,6 +132,7 @@ profile validation contract treats these as paths, not embedded logic.
 | `YOUTU_RAG_BUILD_GRAPH_SCRIPT` | `scripts/build_graph_worker.py` | `build_graph` worker. |
 | `YOUTU_RAG_ANSWER_SCRIPT` | `scripts/answer_worker.py` | `answer` worker. |
 | `YOUTU_RAG_GOLDEN_SCRIPT` | `scripts/generate_retriever_golden.py` | `generate_golden` worker. |
+| `YOUTU_RAG_BENCHMARK_SCRIPT` | `scripts/benchmark_worker.py` | `benchmark` worker. |
 
 `production` requires the Python executable, worker cwd, and worker scripts to
 exist at validation time. `local` may skip them so service contract tests can
@@ -157,6 +158,7 @@ The validation report should include at least these stable check names:
 | `build_graph_script` | Build graph worker script exists when profile requires workers. |
 | `answer_script` | Answer worker script exists when profile requires workers. |
 | `golden_script` | Golden generation worker script exists when profile requires workers. |
+| `benchmark_script` | Benchmark worker script exists when profile requires workers. |
 
 Future implementations may add checks, but existing check names and semantics
 should remain stable for tests and automation.
@@ -234,4 +236,3 @@ Phase 22 is complete when:
   artifact paths.
 - Tests can verify validation behavior without needing real LLM keys or real
   model calls.
-

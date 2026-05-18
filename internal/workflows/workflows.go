@@ -28,6 +28,7 @@ type Status string
 const (
 	TypeBuildAndAnswer = "build_and_answer"
 	TypeCreateDataset  = "create_dataset"
+	TypeBenchmark      = "benchmark"
 )
 
 const (

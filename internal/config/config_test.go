@@ -78,6 +78,9 @@ func TestLoadParsesServiceEnvironment(t *testing.T) {
 	if cfg.AnswerScript != filepath.Join("/tmp/youtu", "scripts", "answer_worker.py") {
 		t.Fatalf("answer script = %q", cfg.AnswerScript)
 	}
+	if cfg.BenchmarkScript != filepath.Join("/tmp/youtu", "scripts", "benchmark_worker.py") {
+		t.Fatalf("benchmark script = %q", cfg.BenchmarkScript)
+	}
 	if cfg.WorkerCWD != "/tmp/youtu" {
 		t.Fatalf("worker cwd = %q", cfg.WorkerCWD)
 	}
@@ -90,9 +93,10 @@ func TestValidateServiceConfigurationProfiles(t *testing.T) {
 	parse := filepath.Join(dir, "parse.py")
 	build := filepath.Join(dir, "build.py")
 	answer := filepath.Join(dir, "answer.py")
+	benchmark := filepath.Join(dir, "benchmark.py")
 	graph := filepath.Join(dir, "output", "graphs", "demo_new.json")
 	chunks := filepath.Join(dir, "output", "chunks", "demo.txt")
-	for _, path := range []string{python, golden, parse, build, answer, graph, chunks} {
+	for _, path := range []string{python, golden, parse, build, answer, benchmark, graph, chunks} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
@@ -114,6 +118,7 @@ func TestValidateServiceConfigurationProfiles(t *testing.T) {
 		ParseDocsScript:  parse,
 		BuildGraphScript: build,
 		AnswerScript:     answer,
+		BenchmarkScript:  benchmark,
 	})
 	if !report.Ready || report.SchemaVersion != config.ValidationSchemaVersion || report.Err() != nil {
 		t.Fatalf("report = %#v err=%v", report, report.Err())
@@ -168,6 +173,7 @@ func TestValidateServiceConfigurationStableChecksAndFailureProfiles(t *testing.T
 		"parse_documents_script",
 		"build_graph_script",
 		"answer_script",
+		"benchmark_script",
 		"default_graph",
 		"default_chunks",
 		"sidecar_url",

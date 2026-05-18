@@ -2074,6 +2074,155 @@ with open(output, "w", encoding="utf-8") as f:
 	}
 }
 
+func TestBenchmarkJobEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	outputPath := filepath.Join(dir, "output", "benchmarks", "anony_eng.json")
+	qaPath := filepath.Join(dir, "data", "anony_eng", "final_qa_pairs.json")
+	mustWrite(t, qaPath, `[{"question":"Q?","answer":"A"}]`)
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import json
+import os
+import sys
+
+def value(flag):
+    return sys.argv[sys.argv.index(flag) + 1]
+
+dataset = value("--dataset")
+qa = value("--qa")
+out = value("--output")
+assert value("--answer-model") == "deepseek-v4-pro"
+os.makedirs(os.path.dirname(out), exist_ok=True)
+with open(out, "w", encoding="utf-8") as f:
+    json.dump({
+        "schema_version": "benchmark-result/v1",
+        "dataset": dataset,
+        "qa_path": qa,
+        "question_count": 1,
+        "correct_count": 1,
+        "accuracy": 1.0,
+        "items": [{"id": "qa_1", "judge": "1", "correct": True}],
+    }, f)
+print("benchmark ok")
+`)
+	service := svc.NewService(config.Config{
+		DefaultDataset:  "demo",
+		DefaultMode:     "noagent",
+		ArtifactRoot:    dir,
+		CorpusRoot:      filepath.Join(dir, "data"),
+		SchemaRoot:      filepath.Join(dir, "schemas"),
+		GraphRoot:       filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:      filepath.Join(dir, "output", "chunks"),
+		CacheRoot:       filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:         filepath.Join(dir, "jobs"),
+		PythonBin:       "python3",
+		BenchmarkScript: scriptPath,
+		WorkerCWD:       dir,
+		DatasetNames:    []string{"demo"},
+	})
+	routes := service.Routes()
+
+	body := bytes.NewBufferString(`{"type":"benchmark","benchmark":{"dataset":"anony_eng","qa_path":` + quote(qaPath) + `,"output_path":` + quote(outputPath) + `,"limit":1,"answer_model":"deepseek-v4-pro","judge_model":"deepseek-v4-pro","llm_base_url":"https://api.deepseek.com"}}`)
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create benchmark status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created benchmark job: %v", err)
+	}
+	spec, _ := created["spec"].(map[string]any)
+	if created["type"] != "benchmark" || spec["script_path"] != scriptPath ||
+		spec["qa_path"] != qaPath || spec["output_path"] != outputPath {
+		t.Fatalf("created benchmark job = %#v", created)
+	}
+
+	job := waitForServiceJob(t, routes, created["id"].(string), "succeeded")
+	result, _ := job["result"].(map[string]any)
+	if result["schema_version"] != "benchmark-job-result/v1" || result["dataset"] != "anony_eng" ||
+		result["question_count"].(float64) != 1 || result["accuracy"].(float64) != 1.0 {
+		t.Fatalf("benchmark result = %#v", result)
+	}
+	if !containsArtifactStatus(job, "qa", "configured") ||
+		!containsArtifactStatus(job, "benchmark_result", "written") {
+		t.Fatalf("benchmark artifacts = %#v", job["artifacts"])
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("benchmark output missing: %v", err)
+	}
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created["id"].(string)+"/events", nil))
+	if !strings.Contains(events.Body.String(), `"worker_started"`) ||
+		!strings.Contains(events.Body.String(), `"artifact_benchmark_written"`) {
+		t.Fatalf("benchmark events = %s", events.Body.String())
+	}
+}
+
+func TestBenchmarkWorkflowEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	qaPath := filepath.Join(dir, "data", "anony_eng", "final_qa_pairs.json")
+	mustWrite(t, qaPath, `[{"question":"Q?","answer":"A"}]`)
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import json
+import os
+import sys
+out = sys.argv[sys.argv.index("--output") + 1]
+dataset = sys.argv[sys.argv.index("--dataset") + 1]
+os.makedirs(os.path.dirname(out), exist_ok=True)
+with open(out, "w", encoding="utf-8") as f:
+    json.dump({
+        "schema_version": "benchmark-result/v1",
+        "dataset": dataset,
+        "question_count": 2,
+        "correct_count": 1,
+        "accuracy": 0.5,
+        "items": [{"id": "qa_1"}, {"id": "qa_2"}],
+    }, f)
+`)
+	service := svc.NewService(config.Config{
+		DefaultDataset:  "demo",
+		DefaultMode:     "noagent",
+		ArtifactRoot:    dir,
+		CorpusRoot:      filepath.Join(dir, "data"),
+		SchemaRoot:      filepath.Join(dir, "schemas"),
+		GraphRoot:       filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:      filepath.Join(dir, "output", "chunks"),
+		CacheRoot:       filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:         filepath.Join(dir, "jobs"),
+		WorkflowRoot:    filepath.Join(dir, "workflows"),
+		PythonBin:       "python3",
+		BenchmarkScript: scriptPath,
+		WorkerCWD:       dir,
+		DatasetNames:    []string{"demo"},
+	})
+	routes := service.Routes()
+
+	body := bytes.NewBufferString(`{"type":"benchmark","benchmark":{"dataset":"anony_eng","qa_path":` + quote(qaPath) + `,"limit":2}}`)
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/workflows", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create benchmark workflow status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created benchmark workflow: %v", err)
+	}
+	workflow := waitForWorkflow(t, routes, created["id"].(string), "succeeded")
+	if !containsWorkflowStep(workflow, "benchmark", "benchmark", "succeeded") ||
+		!containsArtifactStatus(workflow, "benchmark_result", "written") {
+		t.Fatalf("benchmark workflow = %#v", workflow)
+	}
+	result, _ := workflow["result"].(map[string]any)
+	if result["schema_version"] != "benchmark-workflow-result/v1" ||
+		result["benchmark_job_id"] == "" ||
+		result["question_count"].(float64) != 2 ||
+		result["accuracy"].(float64) != 0.5 {
+		t.Fatalf("benchmark workflow result = %#v", result)
+	}
+}
+
 func TestBuildAndAnswerWorkflowLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	buildScript := filepath.Join(dir, "build_worker.py")

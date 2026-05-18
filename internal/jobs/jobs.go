@@ -24,6 +24,7 @@ const (
 	TypeBuildGraph     = "build_graph"
 	TypeGenerateGolden = "generate_golden"
 	TypeAnswer         = "answer"
+	TypeBenchmark      = "benchmark"
 )
 
 const (
@@ -139,6 +140,32 @@ type AnswerSpec struct {
 	PythonBin     string `json:"python_bin,omitempty"`
 	ScriptPath    string `json:"script_path,omitempty"`
 	WorkingDir    string `json:"working_dir,omitempty"`
+}
+
+// BenchmarkSpec is the typed job spec for Python dataset benchmark workers.
+type BenchmarkSpec struct {
+	Dataset      string `json:"dataset"`
+	QAPath       string `json:"qa_path"`
+	OutputPath   string `json:"output_path"`
+	Limit        int    `json:"limit,omitempty"`
+	Offset       int    `json:"offset,omitempty"`
+	Mode         string `json:"mode,omitempty"`
+	TopK         int    `json:"top_k,omitempty"`
+	AnswerModel  string `json:"answer_model,omitempty"`
+	JudgeModel   string `json:"judge_model,omitempty"`
+	LLMBaseURL   string `json:"llm_base_url,omitempty"`
+	GraphPath    string `json:"graph_path,omitempty"`
+	ChunksPath   string `json:"chunks_path,omitempty"`
+	CacheDir     string `json:"cache_dir,omitempty"`
+	SchemaPath   string `json:"schema_path,omitempty"`
+	ConfigPath   string `json:"config_path,omitempty"`
+	PythonBin    string `json:"python_bin,omitempty"`
+	ScriptPath   string `json:"script_path,omitempty"`
+	WorkingDir   string `json:"working_dir,omitempty"`
+	BuildFirst   bool   `json:"build_first,omitempty"`
+	BuildMode    string `json:"build_mode,omitempty"`
+	CorpusPath   string `json:"corpus_path,omitempty"`
+	BuildGraphID string `json:"build_graph_job_id,omitempty"`
 }
 
 // Runner is the unit of work executed by the manager.

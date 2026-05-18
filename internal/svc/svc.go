@@ -21,6 +21,7 @@ import (
 	"github.com/likun666661/youtu-rag-service/internal/schemas"
 	"github.com/likun666661/youtu-rag-service/internal/sidecarstatus"
 	"github.com/likun666661/youtu-rag-service/internal/workers/answer"
+	"github.com/likun666661/youtu-rag-service/internal/workers/benchmark"
 	"github.com/likun666661/youtu-rag-service/internal/workers/buildgraph"
 	"github.com/likun666661/youtu-rag-service/internal/workers/golden"
 	"github.com/likun666661/youtu-rag-service/internal/workers/parsedocs"
@@ -545,12 +546,14 @@ type createJobRequest struct {
 	ParseDocuments jobs.ParseDocumentsSpec    `json:"parse_documents,omitempty"`
 	BuildGraph     jobs.BuildGraphSpec        `json:"build_graph,omitempty"`
 	Answer         jobs.AnswerSpec            `json:"answer,omitempty"`
+	Benchmark      jobs.BenchmarkSpec         `json:"benchmark,omitempty"`
 }
 
 type createWorkflowRequest struct {
 	Type           string                       `json:"type"`
 	BuildAndAnswer workflows.BuildAndAnswerSpec `json:"build_and_answer,omitempty"`
 	CreateDataset  workflows.CreateDatasetSpec  `json:"create_dataset,omitempty"`
+	Benchmark      jobs.BenchmarkSpec           `json:"benchmark,omitempty"`
 }
 
 func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
@@ -587,6 +590,10 @@ func (s *Service) handleCreateJob(w http.ResponseWriter, r *http.Request) {
 	case jobs.TypeAnswer:
 		spec := s.answerSpec(input.Answer)
 		job := s.submitAnswerJob(spec)
+		writeJSON(w, http.StatusAccepted, job)
+	case jobs.TypeBenchmark:
+		spec := s.benchmarkSpec(input.Benchmark)
+		job := s.submitBenchmarkJob(spec)
 		writeJSON(w, http.StatusAccepted, job)
 	case "":
 		writeError(w, http.StatusBadRequest, "invalid_job_type", fmt.Errorf("type is required"))
@@ -995,6 +1002,148 @@ func answerArtifacts(spec jobs.AnswerSpec) []jobs.Artifact {
 	return artifacts
 }
 
+func (s *Service) benchmarkSpec(input jobs.BenchmarkSpec) jobs.BenchmarkSpec {
+	spec := input
+	if spec.Dataset == "" {
+		spec.Dataset = s.config.DefaultDataset
+	}
+	if spec.Dataset == "" {
+		spec.Dataset = "demo"
+	}
+	artifactPaths := map[string]string{}
+	for _, artifact := range artifacts.NewRegistry(s.config).Artifacts(spec.Dataset) {
+		artifactPaths[artifact.Name] = artifact.Path
+	}
+	if spec.QAPath == "" {
+		spec.QAPath = filepath.Join(s.config.CorpusRoot, spec.Dataset, "final_qa_pairs.json")
+	}
+	if spec.OutputPath == "" {
+		spec.OutputPath = filepath.Join(s.config.ArtifactRoot, "output", "benchmarks", spec.Dataset+".json")
+	}
+	if spec.Mode == "" {
+		spec.Mode = s.config.DefaultMode
+	}
+	if spec.TopK <= 0 {
+		spec.TopK = 20
+	}
+	if spec.GraphPath == "" {
+		spec.GraphPath = artifactPaths["graph"]
+	}
+	if spec.ChunksPath == "" {
+		spec.ChunksPath = artifactPaths["chunks"]
+	}
+	if spec.SchemaPath == "" {
+		spec.SchemaPath = artifactPaths["schema"]
+	}
+	if spec.CacheDir == "" {
+		spec.CacheDir = artifactPaths["cache"]
+	}
+	if spec.CorpusPath == "" {
+		spec.CorpusPath = artifactPaths["corpus"]
+	}
+	if spec.PythonBin == "" {
+		spec.PythonBin = s.config.PythonBin
+	}
+	if spec.ScriptPath == "" {
+		spec.ScriptPath = s.config.BenchmarkScript
+	}
+	if spec.WorkingDir == "" {
+		spec.WorkingDir = s.config.WorkerCWD
+	}
+	return spec
+}
+
+func (s *Service) submitBenchmarkJob(spec jobs.BenchmarkSpec) jobs.Job {
+	artifacts := benchmarkArtifacts(spec)
+	return s.jobs.SubmitSpec(jobs.TypeBenchmark, spec, artifacts, func(ctx context.Context, recorder *jobs.Recorder) (any, error) {
+		recorder.Event("worker_started", "benchmark Python worker started")
+		recorder.Artifact("benchmark_result", "running", "")
+		result, err := benchmark.Run(ctx, benchmark.Config{
+			PythonBin:  spec.PythonBin,
+			ScriptPath: spec.ScriptPath,
+			WorkingDir: spec.WorkingDir,
+		}, spec)
+		if err == nil {
+			recorder.Artifact("benchmark_result", "written", result.OutputPath)
+			recorder.Event("artifact_benchmark_written", "benchmark result artifact written")
+		} else if errors.Is(err, benchmark.ErrMissingOutput) {
+			recorder.Artifact("benchmark_result", "missing", "")
+		} else {
+			recorder.Artifact("benchmark_result", "failed", "")
+		}
+		return result, err
+	})
+}
+
+func benchmarkArtifacts(spec jobs.BenchmarkSpec) []jobs.Artifact {
+	artifacts := []jobs.Artifact{
+		{
+			Name:        "qa",
+			Role:        "input",
+			Kind:        "qa_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.QAPath,
+			Status:      "configured",
+			Description: "QA JSON consumed by the benchmark worker.",
+		},
+	}
+	if spec.GraphPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "graph",
+			Role:        "input",
+			Kind:        "graph_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.GraphPath,
+			Status:      "configured",
+			Description: "Graph JSON consumed by the benchmark worker.",
+		})
+	}
+	if spec.ChunksPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "chunks",
+			Role:        "input",
+			Kind:        "chunks_txt",
+			Dataset:     spec.Dataset,
+			Path:        spec.ChunksPath,
+			Status:      "configured",
+			Description: "Chunk text file consumed by the benchmark worker.",
+		})
+	}
+	if spec.SchemaPath != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "schema",
+			Role:        "input",
+			Kind:        "schema_json",
+			Dataset:     spec.Dataset,
+			Path:        spec.SchemaPath,
+			Status:      "configured",
+			Description: "Schema JSON used by the benchmark worker.",
+		})
+	}
+	if spec.CacheDir != "" {
+		artifacts = append(artifacts, jobs.Artifact{
+			Name:        "cache",
+			Role:        "input",
+			Kind:        "faiss_cache_dir",
+			Dataset:     spec.Dataset,
+			Path:        spec.CacheDir,
+			Status:      "configured",
+			Description: "Vector cache directory used by the benchmark worker.",
+		})
+	}
+	artifacts = append(artifacts, jobs.Artifact{
+		Name:          "benchmark_result",
+		Role:          "output",
+		Kind:          "benchmark_result_json",
+		SchemaVersion: "benchmark-result/v1",
+		Dataset:       spec.Dataset,
+		Path:          spec.OutputPath,
+		Status:        "pending",
+		Description:   "Benchmark result JSON written by the benchmark worker.",
+	})
+	return artifacts
+}
+
 func (s *Service) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 	var input createWorkflowRequest
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -1029,6 +1178,13 @@ func (s *Service) handleCreateWorkflow(w http.ResponseWriter, r *http.Request) {
 			Result: map[string]any{
 				"workflow_id": workflow.ID,
 			},
+		})
+		writeJSON(w, http.StatusAccepted, workflow)
+	case workflows.TypeBenchmark:
+		spec := s.benchmarkSpec(input.Benchmark)
+		artifacts := benchmarkWorkflowArtifacts(spec)
+		workflow := s.workflows.SubmitSpec(input.Type, spec, artifacts, func(ctx context.Context, recorder *workflows.Recorder) (any, error) {
+			return s.runBenchmarkWorkflow(ctx, recorder, spec)
 		})
 		writeJSON(w, http.StatusAccepted, workflow)
 	case "":
@@ -1263,6 +1419,10 @@ func createDatasetArtifacts(spec workflows.CreateDatasetSpec) []jobs.Artifact {
 	return artifacts
 }
 
+func benchmarkWorkflowArtifacts(spec jobs.BenchmarkSpec) []jobs.Artifact {
+	return benchmarkArtifacts(spec)
+}
+
 func (s *Service) runBuildAndAnswerWorkflow(ctx context.Context, recorder *workflows.Recorder, spec workflows.BuildAndAnswerSpec) (any, error) {
 	buildSpec := s.buildGraphSpec(jobs.BuildGraphSpec{
 		Dataset:          spec.Dataset,
@@ -1331,6 +1491,80 @@ func (s *Service) runBuildAndAnswerWorkflow(ctx context.Context, recorder *workf
 		"cache_dir":          buildSpec.CacheDir,
 		"answer_output_path": answerSpec.OutputPath,
 	}, nil
+}
+
+func (s *Service) runBenchmarkWorkflow(ctx context.Context, recorder *workflows.Recorder, spec jobs.BenchmarkSpec) (any, error) {
+	if spec.BuildFirst {
+		buildSpec := s.buildGraphSpec(jobs.BuildGraphSpec{
+			Dataset:          spec.Dataset,
+			CorpusPath:       spec.CorpusPath,
+			SchemaPath:       spec.SchemaPath,
+			GraphOutputPath:  spec.GraphPath,
+			ChunksOutputPath: spec.ChunksPath,
+			CacheDir:         spec.CacheDir,
+			ConfigPath:       spec.ConfigPath,
+			Mode:             spec.BuildMode,
+		})
+		buildJob := s.submitBuildGraphJob(buildSpec)
+		recorder.StepStarted("build_graph", buildJob)
+		var err error
+		buildJob, err = s.waitForJob(ctx, buildJob.ID)
+		recorder.StepFinished("build_graph", buildJob)
+		if err != nil {
+			return nil, err
+		}
+		if buildJob.Status != jobs.StatusSucceeded {
+			return map[string]any{
+				"schema_version":     "benchmark-workflow-result/v1",
+				"dataset":            spec.Dataset,
+				"build_graph_job_id": buildJob.ID,
+			}, fmt.Errorf("build_graph step failed: %s", buildJob.Error)
+		}
+		recorder.Artifact("graph", "written", buildSpec.GraphOutputPath)
+		recorder.Artifact("chunks", "written", buildSpec.ChunksOutputPath)
+		if buildSpec.CacheDir != "" {
+			recorder.Artifact("cache", "written", buildSpec.CacheDir)
+		}
+		recorder.Event("artifact_handoff", "build_graph graph/chunks artifacts handed to benchmark")
+		spec.GraphPath = buildSpec.GraphOutputPath
+		spec.ChunksPath = buildSpec.ChunksOutputPath
+		spec.CacheDir = buildSpec.CacheDir
+		spec.SchemaPath = buildSpec.SchemaPath
+		spec.BuildGraphID = buildJob.ID
+	}
+
+	benchmarkSpec := s.benchmarkSpec(spec)
+	benchmarkJob := s.submitBenchmarkJob(benchmarkSpec)
+	recorder.StepStarted("benchmark", benchmarkJob)
+	benchmarkJob, err := s.waitForJob(ctx, benchmarkJob.ID)
+	recorder.StepFinished("benchmark", benchmarkJob)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]any{
+		"schema_version":     "benchmark-workflow-result/v1",
+		"dataset":            benchmarkSpec.Dataset,
+		"benchmark_job_id":   benchmarkJob.ID,
+		"build_graph_job_id": benchmarkSpec.BuildGraphID,
+		"output_path":        benchmarkSpec.OutputPath,
+	}
+	if jobResult, ok := benchmarkJob.Result.(*benchmark.Result); ok && jobResult != nil {
+		result["accuracy"] = jobResult.Accuracy
+		result["question_count"] = jobResult.QuestionCount
+	} else if resultMap, ok := benchmarkJob.Result.(map[string]any); ok {
+		if accuracy, ok := resultMap["accuracy"]; ok {
+			result["accuracy"] = accuracy
+		}
+		if count, ok := resultMap["question_count"]; ok {
+			result["question_count"] = count
+		}
+	}
+	if benchmarkJob.Status != jobs.StatusSucceeded {
+		recorder.Artifact("benchmark_result", "failed", "")
+		return result, fmt.Errorf("benchmark step failed: %s", benchmarkJob.Error)
+	}
+	recorder.Artifact("benchmark_result", "written", benchmarkSpec.OutputPath)
+	return result, nil
 }
 
 func (s *Service) runCreateDatasetWorkflow(ctx context.Context, recorder *workflows.Recorder, spec workflows.CreateDatasetSpec) (any, error) {

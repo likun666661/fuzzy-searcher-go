@@ -39,6 +39,7 @@ type Config struct {
 	ParseDocsScript  string
 	BuildGraphScript string
 	AnswerScript     string
+	BenchmarkScript  string
 	WorkerCWD        string
 	DatasetNames     []string
 	Path2Threshold   float64
@@ -78,6 +79,7 @@ func Load() Config {
 		ParseDocsScript:  getenv("YOUTU_RAG_PARSE_DOCUMENTS_SCRIPT", filepath.Join(artifactRoot, "scripts", "parse_documents_worker.py")),
 		BuildGraphScript: getenv("YOUTU_RAG_BUILD_GRAPH_SCRIPT", filepath.Join(artifactRoot, "scripts", "build_graph_worker.py")),
 		AnswerScript:     getenv("YOUTU_RAG_ANSWER_SCRIPT", filepath.Join(artifactRoot, "scripts", "answer_worker.py")),
+		BenchmarkScript:  getenv("YOUTU_RAG_BENCHMARK_SCRIPT", filepath.Join(artifactRoot, "scripts", "benchmark_worker.py")),
 		WorkerCWD:        getenv("YOUTU_RAG_WORKER_CWD", artifactRoot),
 		DatasetNames:     getenvList("YOUTU_RAG_DATASETS", []string{defaultDataset}),
 		Path2Threshold:   getenvFloat("YOUTU_RAG_PATH2_THRESHOLD", 0.1),

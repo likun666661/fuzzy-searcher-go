@@ -72,6 +72,7 @@ func Validate(cfg Config) ValidationReport {
 	add(pathCheck("parse_documents_script", cfg.ParseDocsScript, requiresWorkers(report.Profile)))
 	add(pathCheck("build_graph_script", cfg.BuildGraphScript, requiresWorkers(report.Profile)))
 	add(pathCheck("answer_script", cfg.AnswerScript, requiresWorkers(report.Profile)))
+	add(pathCheck("benchmark_script", cfg.BenchmarkScript, requiresWorkers(report.Profile)))
 	add(pathCheck("default_graph", cfg.DefaultGraph, requiresDemoRetrieval(report.Profile)))
 	add(pathCheck("default_chunks", cfg.DefaultChunks, requiresDemoRetrieval(report.Profile)))
 	add(ValidationCheck{
@@ -211,6 +212,8 @@ func envName(name string) string {
 		return "YOUTU_RAG_BUILD_GRAPH_SCRIPT"
 	case "answer_script":
 		return "YOUTU_RAG_ANSWER_SCRIPT"
+	case "benchmark_script":
+		return "YOUTU_RAG_BENCHMARK_SCRIPT"
 	case "default_graph":
 		return "YOUTU_RAG_GRAPH"
 	case "default_chunks":
