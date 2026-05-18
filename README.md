@@ -54,9 +54,10 @@ For the next service-oriented Youtu-RAG roadmap, read
 `docs/youtu_rag_service_plan.md`. For the latest gap map against the original
 Python repo and the workflow orchestration plan, read
 `docs/youtu_rag_gap_map.md`. For the service testing track, read
-`docs/service_test_strategy.md`. The machine-readable HTTP release surface is
-tracked in `docs/openapi.yaml`, with release notes in
-`docs/release_surface.md`.
+`docs/service_test_strategy.md`. For dataset benchmark preparation and the
+current Python-vs-service benchmark boundary, read `docs/benchmark_guide.md`.
+The machine-readable HTTP release surface is tracked in `docs/openapi.yaml`,
+with release notes in `docs/release_surface.md`.
 
 ## Test
 
@@ -520,3 +521,25 @@ parity contract is documented in `docs/contracts/path1_candidate_generation.md`.
 The Phase 14 workflow contract is documented in `docs/contracts/workflows.md`.
 Dataset schema management is documented in
 `docs/contracts/schema_management.md`.
+
+## Dataset Benchmarking
+
+For one-off dataset benchmark experiments, start with
+`docs/benchmark_guide.md`. The short version is:
+
+- `make demo-service-smoke` checks the service/retrieval demo path with real
+  Python sidecar artifacts.
+- The original Python `youtu-graphrag/main.py` remains the closest path to the
+  paper-style dataset benchmark today because it already loops over QA pairs,
+  generates answers, and runs the LLM judge.
+- This Go service has the building blocks for a durable benchmark service
+  feature, but it does not yet have a one-command batch `benchmark` job.
+
+When using DeepSeek for answer/judge experiments, map the existing key into the
+Youtu-RAG environment names instead of writing secrets to disk:
+
+```bash
+export LLM_API_KEY="${DEEPSEEK_API_KEY}"
+export LLM_BASE_URL="https://api.deepseek.com"
+export LLM_MODEL="deepseek-v4-pro"
+```
