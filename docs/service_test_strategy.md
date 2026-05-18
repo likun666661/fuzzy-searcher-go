@@ -156,6 +156,18 @@ GOLDEN=/abs/path/youtu-graphrag/output/retrieval_golden/demo.json \
 scripts/run_demo_gates.sh
 ```
 
+Real service demo gate:
+
+```bash
+YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag \
+YOUTU_RAG_SIDECAR_URL=http://127.0.0.1:8765 \
+make demo-service-smoke
+```
+
+This gate uses real demo graph/chunks/cache and the Python vector sidecar, but
+does not require an LLM key. The contract is documented in
+`docs/contracts/real_demo_smoke.md`.
+
 Service smoke gate:
 
 ```bash

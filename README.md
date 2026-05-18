@@ -142,6 +142,11 @@ import, retrieve, async retrieve job, and job events. Use
 `SMOKE_ADDR=127.0.0.1:18081` to avoid a local port conflict, or
 `KEEP_SMOKE_ARTIFACTS=1` to inspect the generated fixture files and service log.
 
+For a real demo smoke that uses the sibling `youtu-graphrag` demo graph,
+chunks, FAISS cache, and Python vector sidecar, see
+`docs/contracts/real_demo_smoke.md`. That smoke validates real retrieval through
+the Go HTTP service without requiring an LLM API key.
+
 Set `YOUTU_RAG_VALIDATE_ON_START=true` to make `make service-run` fail before
 binding HTTP when the current profile is not ready.
 
