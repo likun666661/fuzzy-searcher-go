@@ -545,3 +545,14 @@ export LLM_API_KEY="${DEEPSEEK_API_KEY}"
 export LLM_BASE_URL="https://api.deepseek.com"
 export LLM_MODEL="deepseek-v4-pro"
 ```
+
+To prepare the public AnonyRAG dataset locally:
+
+```bash
+python3 scripts/prepare_anonyrag.py \
+  --artifact-root /abs/path/youtu-graphrag
+```
+
+This downloads the Hugging Face parquet files and writes
+`data/anony_chs` / `data/anony_eng` JSON files in the original
+`youtu-graphrag` layout.
