@@ -379,6 +379,9 @@ Submit:
     "output_path": "/abs/path/youtu-graphrag/output/benchmarks/anony_eng_smoke.json",
     "limit": 20,
     "mode": "noagent",
+    "retrieve_url": "http://127.0.0.1:18083",
+    "retrieve_mode": "native-path1-rerank",
+    "sidecar_url": "http://127.0.0.1:8765",
     "top_k": 20,
     "answer_model": "deepseek-v4-pro",
     "judge_model": "deepseek-v4-pro",
@@ -393,6 +396,11 @@ artifacts plus a `benchmark_result` output artifact with
 `benchmark-job-result/v1` summary; the full item-level result stays on disk.
 Long benchmark runs should emit `benchmark_progress` events and may write a
 `benchmark_checkpoint` JSONL artifact for resume.
+
+For paper-style GraphRAG retrieval evaluation, set `retrieve_url` and
+`retrieve_mode`. Without those fields, the default worker may use a lightweight
+corpus keyword-overlap context baseline; that mode is useful for service smoke
+but must not be reported as the Youtu-GraphRAG/rerank chain.
 
 The detailed Python worker and workflow contract is defined in
 `docs/contracts/benchmark_worker.md`.

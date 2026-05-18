@@ -1035,6 +1035,12 @@ func (s *Service) benchmarkSpec(input jobs.BenchmarkSpec) jobs.BenchmarkSpec {
 	if spec.Mode == "" {
 		spec.Mode = s.config.DefaultMode
 	}
+	if spec.RetrieveMode == "" {
+		spec.RetrieveMode = spec.Mode
+	}
+	if spec.SidecarURL == "" {
+		spec.SidecarURL = s.config.DefaultSidecar
+	}
 	if spec.TopK <= 0 {
 		spec.TopK = 20
 	}

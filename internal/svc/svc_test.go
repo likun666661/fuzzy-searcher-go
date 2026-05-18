@@ -2092,6 +2092,9 @@ dataset = value("--dataset")
 qa = value("--qa")
 out = value("--output")
 assert value("--answer-model") == "deepseek-v4-pro"
+assert value("--retrieve-url") == "http://127.0.0.1:18082"
+assert value("--retrieve-mode") == "native-path1-rerank"
+assert value("--sidecar-url") == "http://127.0.0.1:18765"
 os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w", encoding="utf-8") as f:
     json.dump({
@@ -2118,11 +2121,12 @@ print("benchmark ok")
 		PythonBin:       "python3",
 		BenchmarkScript: scriptPath,
 		WorkerCWD:       dir,
+		DefaultSidecar:  "http://127.0.0.1:18765",
 		DatasetNames:    []string{"demo"},
 	})
 	routes := service.Routes()
 
-	body := bytes.NewBufferString(`{"type":"benchmark","benchmark":{"dataset":"anony_eng","qa_path":` + quote(qaPath) + `,"output_path":` + quote(outputPath) + `,"limit":1,"answer_model":"deepseek-v4-pro","judge_model":"deepseek-v4-pro","llm_base_url":"https://api.deepseek.com"}}`)
+	body := bytes.NewBufferString(`{"type":"benchmark","benchmark":{"dataset":"anony_eng","qa_path":` + quote(qaPath) + `,"output_path":` + quote(outputPath) + `,"limit":1,"retrieve_url":"http://127.0.0.1:18082","retrieve_mode":"native-path1-rerank","answer_model":"deepseek-v4-pro","judge_model":"deepseek-v4-pro","llm_base_url":"https://api.deepseek.com"}}`)
 	create := httptest.NewRecorder()
 	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
 	if create.Code != http.StatusAccepted {
@@ -2134,7 +2138,9 @@ print("benchmark ok")
 	}
 	spec, _ := created["spec"].(map[string]any)
 	if created["type"] != "benchmark" || spec["script_path"] != scriptPath ||
-		spec["qa_path"] != qaPath || spec["output_path"] != outputPath {
+		spec["qa_path"] != qaPath || spec["output_path"] != outputPath ||
+		spec["retrieve_url"] != "http://127.0.0.1:18082" ||
+		spec["retrieve_mode"] != "native-path1-rerank" {
 		t.Fatalf("created benchmark job = %#v", created)
 	}
 

@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -138,6 +139,79 @@ def select_context(question: str, chunks: list[dict[str, str]], limit: int = 4) 
             scored.append((score, chunk))
     scored.sort(key=lambda pair: (-pair[0], pair[1].get("id", "")))
     return [chunk for _, chunk in scored[:limit]]
+
+
+def post_json(url: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"retrieve HTTP {exc.code}: {detail[:800]}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"retrieve response is not an object: {type(data).__name__}")
+    return data
+
+
+def retrieve_context(question: str, args: argparse.Namespace, timeout: float) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if not args.retrieve_url:
+        contexts = select_context_from_args(question, args)
+        return contexts, {
+            "context_source": "corpus_keyword_overlap" if contexts else "none",
+            "chunk_ids": [chunk["id"] for chunk in contexts],
+            "triples_count": 0,
+            "chunk_count": len(contexts),
+        }
+
+    endpoint = urllib.parse.urljoin(args.retrieve_url.rstrip("/") + "/", "v1/retrieve")
+    payload: dict[str, Any] = {
+        "dataset": args.dataset,
+        "question": question,
+        "top_k": args.top_k,
+        "mode": args.retrieve_mode or args.mode,
+    }
+    if args.graph:
+        payload["graph_path"] = args.graph
+    if args.chunks:
+        payload["chunks_path"] = args.chunks
+    if args.sidecar_url:
+        payload["sidecar_url"] = args.sidecar_url
+    result = post_json(endpoint, payload, timeout)
+    triples = [str(item) for item in result.get("triples") or [] if str(item).strip()]
+    chunk_ids = [str(item) for item in result.get("chunk_ids") or [] if str(item).strip()]
+    chunk_contents = [str(item) for item in result.get("chunk_contents") or [] if str(item).strip()]
+    chunk_results = [str(item) for item in result.get("chunk_retrieval_results") or [] if str(item).strip()]
+    contexts: list[dict[str, str]] = []
+    if triples:
+        contexts.append({"id": "retrieved_triples", "title": "Retrieved triples", "text": "\n".join(triples[: args.top_k])})
+    for idx, content in enumerate(chunk_contents[: max(args.top_k, 1)]):
+        chunk_id = chunk_ids[idx] if idx < len(chunk_ids) else f"chunk_{idx + 1}"
+        contexts.append({"id": chunk_id, "title": "Retrieved chunk", "text": content})
+    if not chunk_contents and chunk_results:
+        for idx, content in enumerate(chunk_results[: max(args.top_k, 1)]):
+            chunk_id = chunk_ids[idx] if idx < len(chunk_ids) else f"retrieval_result_{idx + 1}"
+            contexts.append({"id": chunk_id, "title": "Chunk retrieval result", "text": content})
+    strategies = ((result.get("debug") or {}).get("strategies") or []) if isinstance(result.get("debug"), dict) else []
+    strategy_names = [str(item.get("name")) for item in strategies if isinstance(item, dict) and item.get("name")]
+    return contexts, {
+        "context_source": "service_retrieve",
+        "retrieve_url": args.retrieve_url,
+        "retrieve_mode": payload.get("mode"),
+        "chunk_ids": chunk_ids,
+        "triples_count": len(triples),
+        "chunk_count": len(chunk_contents) or len(chunk_results),
+        "debug_strategies": strategy_names,
+    }
+
+
+def select_context_from_args(question: str, args: argparse.Namespace) -> list[dict[str, str]]:
+    return select_context(question, args._corpus, limit=min(max(args.top_k, 1), 6))
 
 
 def anonymized_ids(text: str) -> list[str]:
@@ -401,6 +475,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--mode", default="noagent")
+    parser.add_argument("--retrieve-url", default="")
+    parser.add_argument("--retrieve-mode", default="")
+    parser.add_argument("--sidecar-url", default="")
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--answer-model", default="")
     parser.add_argument("--judge-model", default="")
@@ -536,14 +613,16 @@ def run_one_item(
     item_start = time.time()
     question = row["_question"]
     gold = row["_answer"]
-    contexts = select_context(question, corpus, limit=min(max(args.top_k, 1), 6))
+    contexts: list[dict[str, str]] = []
     predicted = ""
     original_predicted = ""
     judge = "0"
     error = ""
     repair_error = ""
     repaired = False
+    retrieval_meta: dict[str, Any] = {}
     try:
+        contexts, retrieval_meta = retrieve_context(question, args, timeout)
         rate_limiter.wait()
         predicted = answer_question(base_url, key, answer_model, question, contexts, timeout)
         original_predicted = predicted
@@ -575,7 +654,8 @@ def run_one_item(
         "mapping_score": score_anonymized_mappings(gold, predicted),
         "latency_ms": int((time.time() - item_start) * 1000),
         "error": error,
-        "context_chunk_ids": [chunk["id"] for chunk in contexts],
+        "context_chunk_ids": retrieval_meta.get("chunk_ids") or [chunk["id"] for chunk in contexts],
+        "retrieval": retrieval_meta,
         "finished_at": now_iso(),
     }
 
@@ -601,6 +681,7 @@ def main() -> int:
     resumed_by_id = load_checkpoint(args.checkpoint) if args.resume else {}
     corpus_path = args.corpus or infer_corpus_path(args.qa)
     corpus = load_corpus(corpus_path)
+    args._corpus = corpus
     concurrency = max(args.concurrency, 1)
     checkpoint_every = max(args.checkpoint_every, 1)
     rate_limiter = RateLimiter(args.rate_limit_rpm)
@@ -767,9 +848,12 @@ def main() -> int:
         },
         "retrieval": {
             "mode": args.mode,
+            "retrieve_url": args.retrieve_url,
+            "retrieve_mode": args.retrieve_mode or args.mode,
+            "sidecar_url": args.sidecar_url,
             "top_k": args.top_k,
             "concurrency": concurrency,
-            "context_source": "corpus_keyword_overlap" if corpus else "none",
+            "context_source": "service_retrieve" if args.retrieve_url else ("corpus_keyword_overlap" if corpus else "none"),
             "graph_path": args.graph,
             "chunks_path": args.chunks,
             "cache_dir": args.cache_dir,

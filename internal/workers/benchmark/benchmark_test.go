@@ -32,6 +32,9 @@ assert "--checkpoint-every" in sys.argv
 assert "--max-failures" in sys.argv
 assert "--question-timeout" in sys.argv
 assert "--resume" in sys.argv
+assert "--retrieve-url" in sys.argv
+assert "--retrieve-mode" in sys.argv
+assert "--sidecar-url" in sys.argv
 os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w", encoding="utf-8") as f:
     json.dump({
@@ -65,6 +68,9 @@ print(json.dumps({"ok": True, "output": out}))
 		QuestionTimeoutSeconds: 30,
 		Resume:                 true,
 		Mode:                   "noagent",
+		RetrieveURL:            "http://127.0.0.1:18082",
+		RetrieveMode:           "native-path1-rerank",
+		SidecarURL:             "http://127.0.0.1:18765",
 		TopK:                   20,
 		AnswerModel:            "deepseek-v4-pro",
 		JudgeModel:             "deepseek-v4-pro",

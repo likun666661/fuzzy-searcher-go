@@ -15,6 +15,9 @@ Common overrides:
   BENCHMARK_DATASET=anony_eng
   BENCHMARK_LIMIT=1
   BENCHMARK_CONCURRENCY=1
+  BENCHMARK_RETRIEVE_BACKED=1
+  BENCHMARK_RETRIEVE_MODE=native-path1-rerank
+  YOUTU_RAG_SIDECAR_URL=http://127.0.0.1:8765
   BENCHMARK_JOB_TIMEOUT_SECONDS=1800
   BENCHMARK_MODEL=deepseek-v4-pro
   LLM_API_KEY="${DEEPSEEK_API_KEY}"
@@ -41,6 +44,8 @@ SERVICE_URL="http://$SERVICE_ADDR"
 DATASET="${BENCHMARK_DATASET:-anony_eng}"
 LIMIT="${BENCHMARK_LIMIT:-1}"
 CONCURRENCY="${BENCHMARK_CONCURRENCY:-1}"
+RETRIEVE_BACKED="${BENCHMARK_RETRIEVE_BACKED:-0}"
+RETRIEVE_MODE="${BENCHMARK_RETRIEVE_MODE:-native-path1-rerank}"
 JOB_TIMEOUT_SECONDS="${BENCHMARK_JOB_TIMEOUT_SECONDS:-1800}"
 MODEL="${BENCHMARK_MODEL:-${LLM_MODEL:-deepseek-v4-pro}}"
 BASE_URL="${BENCHMARK_LLM_BASE_URL:-${LLM_BASE_URL:-https://api.deepseek.com}}"
@@ -117,6 +122,7 @@ export YOUTU_RAG_PYTHON="$PYTHON_BIN"
 export YOUTU_RAG_BENCHMARK_SCRIPT="$SCRIPT"
 export YOUTU_RAG_WORKER_CWD="$(pwd)"
 export YOUTU_RAG_VALIDATE_ON_START=false
+export YOUTU_RAG_SIDECAR_URL="${YOUTU_RAG_SIDECAR_URL:-}"
 
 echo "artifact root: $ROOT" >&2
 echo "dataset: $DATASET" >&2
@@ -126,18 +132,23 @@ echo "service: $SERVICE_URL" >&2
 echo "output: $OUTPUT" >&2
 echo "progress: $PROGRESS" >&2
 echo "checkpoint: $CHECKPOINT" >&2
+echo "retrieve-backed: $RETRIEVE_BACKED" >&2
+if [ "$RETRIEVE_BACKED" = "1" ]; then
+  echo "retrieve mode: $RETRIEVE_MODE" >&2
+  echo "sidecar: ${YOUTU_RAG_SIDECAR_URL:-<service default/empty>}" >&2
+fi
 
 go run ./cmd/youtu-rag-service > "$OUT_DIR/service.log" 2>&1 &
 SERVICE_PID="$!"
 
-python3 - "$SERVICE_URL" "$DATASET" "$QA" "$CORPUS" "$SCHEMA" "$OUTPUT" "$PROGRESS" "$CHECKPOINT" "$LIMIT" "$CONCURRENCY" "$MODEL" "$BASE_URL" "$JOB_TIMEOUT_SECONDS" <<'PY'
+python3 - "$SERVICE_URL" "$DATASET" "$QA" "$CORPUS" "$SCHEMA" "$OUTPUT" "$PROGRESS" "$CHECKPOINT" "$LIMIT" "$CONCURRENCY" "$MODEL" "$BASE_URL" "$JOB_TIMEOUT_SECONDS" "$RETRIEVE_BACKED" "$RETRIEVE_MODE" "${YOUTU_RAG_SIDECAR_URL:-}" <<'PY'
 import json
 import sys
 import time
 import urllib.error
 import urllib.request
 
-base, dataset, qa, corpus, schema, output, progress, checkpoint, limit, concurrency, model, base_url, job_timeout_seconds = sys.argv[1:14]
+base, dataset, qa, corpus, schema, output, progress, checkpoint, limit, concurrency, model, base_url, job_timeout_seconds, retrieve_backed, retrieve_mode, sidecar_url = sys.argv[1:17]
 
 
 def request(method, path, body=None, timeout=180):
@@ -166,25 +177,31 @@ while True:
             raise
         time.sleep(0.25)
 
+benchmark = {
+    "dataset": dataset,
+    "qa_path": qa,
+    "corpus_path": corpus,
+    "schema_path": schema,
+    "output_path": output,
+    "progress_path": progress,
+    "checkpoint_path": checkpoint,
+    "limit": int(limit),
+    "concurrency": int(concurrency),
+    "checkpoint_every": 1,
+    "mode": "noagent",
+    "top_k": 20,
+    "answer_model": model,
+    "judge_model": model,
+    "llm_base_url": base_url,
+}
+if retrieve_backed == "1":
+    benchmark["retrieve_url"] = base
+    benchmark["retrieve_mode"] = retrieve_mode
+    benchmark["sidecar_url"] = sidecar_url
+
 created = request("POST", "/v1/jobs", {
     "type": "benchmark",
-    "benchmark": {
-        "dataset": dataset,
-        "qa_path": qa,
-        "corpus_path": corpus,
-        "schema_path": schema,
-        "output_path": output,
-        "progress_path": progress,
-        "checkpoint_path": checkpoint,
-        "limit": int(limit),
-        "concurrency": int(concurrency),
-        "checkpoint_every": 1,
-        "mode": "noagent",
-        "top_k": 20,
-        "answer_model": model,
-        "judge_model": model,
-        "llm_base_url": base_url,
-    },
+    "benchmark": benchmark,
 }, timeout=30)
 job_id = created["id"]
 deadline = time.time() + int(job_timeout_seconds)

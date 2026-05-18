@@ -158,6 +158,9 @@ type BenchmarkSpec struct {
 	QuestionTimeoutSeconds int    `json:"question_timeout_seconds,omitempty"`
 	Resume                 bool   `json:"resume,omitempty"`
 	Mode                   string `json:"mode,omitempty"`
+	RetrieveURL            string `json:"retrieve_url,omitempty"`
+	RetrieveMode           string `json:"retrieve_mode,omitempty"`
+	SidecarURL             string `json:"sidecar_url,omitempty"`
 	TopK                   int    `json:"top_k,omitempty"`
 	AnswerModel            string `json:"answer_model,omitempty"`
 	JudgeModel             string `json:"judge_model,omitempty"`
