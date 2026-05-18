@@ -1,7 +1,10 @@
-.PHONY: test service-run service-check service-local service-smoke demo-gates demo-gate-rerank
+.PHONY: test release-check service-run service-check service-local service-smoke demo-gates demo-gate-rerank
 
 test:
 	go test ./...
+
+release-check:
+	scripts/check_release_surface.py
 
 service-run:
 	go run ./cmd/youtu-rag-service

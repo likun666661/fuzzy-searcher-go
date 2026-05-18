@@ -37,7 +37,11 @@ The OpenAPI contract covers these external HTTP groups:
 
 ## Validation Gate
 
-Phase 24 release checks should at minimum parse `docs/openapi.yaml` as YAML and
-confirm it mentions every route registered by `internal/svc.Service.Routes`.
-End-to-end behavior remains covered by service smoke and regression tests.
-
+Phase 24 release checks should run `scripts/check_release_surface.py`. The
+checker intentionally uses only the Python standard library so clean clones do
+not need PyYAML just to validate the release inventory. It verifies that
+`docs/openapi.yaml` declares every public route registered by
+`internal/svc.Service.Routes`, that key versioned response contracts appear in
+the OpenAPI file, and that `.env.example` plus local/smoke scripts expose the
+expected operational entrypoints. End-to-end behavior remains covered by
+service smoke and regression tests.

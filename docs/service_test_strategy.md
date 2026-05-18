@@ -156,13 +156,11 @@ GOLDEN=/abs/path/youtu-graphrag/output/retrieval_golden/demo.json \
 scripts/run_demo_gates.sh
 ```
 
-Future service smoke gate:
+Service smoke gate:
 
 ```bash
-go run ./cmd/youtu-rag-service
-curl -fsS http://127.0.0.1:8080/healthz
-curl -fsS http://127.0.0.1:8080/readyz
-curl -fsS http://127.0.0.1:8080/v1/sidecars/vector/health?dataset=demo
+make release-check
+make service-smoke
 ```
 
 ## Review Checklist
