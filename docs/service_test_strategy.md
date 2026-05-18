@@ -41,6 +41,8 @@ Required coverage:
 - `/v1/retrieve` validation, supported modes, unsupported modes.
 - `/v1/datasets`, `/v1/datasets/{dataset}`,
   `/v1/datasets/{dataset}/artifacts`.
+- schema management APIs: `GET/PUT /v1/datasets/{dataset}/schema` and
+  `POST /v1/schemas/validate`.
 - `/v1/sidecars` and `/v1/sidecars/vector/health`.
 - `/v1/jobs`, `/v1/jobs/{job_id}`, `/v1/jobs/{job_id}/events`,
   `/v1/jobs/{job_id}/cancel`.

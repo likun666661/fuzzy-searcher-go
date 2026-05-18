@@ -162,6 +162,8 @@ Fields:
 Required preconditions:
 
 - require managed corpus and schema to exist;
+- require the schema to pass `docs/contracts/schema_management.md` validation,
+  or require an explicitly allowed default fallback;
 - require dataset metadata to exist unless a future explicit `force` option is
   added;
 - resolve corpus/schema from managed artifact paths, not from caller-supplied

@@ -9,6 +9,9 @@ artifact handoff, persistence, cancellation, and restart behavior. Python
 continues to own document parsing and graph construction internals through the
 existing workers.
 
+Schema validation and managed schema metadata follow
+`docs/contracts/schema_management.md`.
+
 ## Workflow Request
 
 ```http
@@ -92,6 +95,8 @@ Dataset import outputs:
 
 - `corpus`: managed corpus JSON copied or written under the corpus root.
 - `schema`: managed schema JSON copied under the schema root.
+- `schema_metadata`: schema version/hash metadata written under the dataset
+  metadata root.
 - `dataset_metadata`: metadata JSON written under the dataset metadata root,
   `schema_version=dataset-import/v1`.
 
@@ -107,7 +112,9 @@ Handoff rules:
 - `parse_documents.corpus` becomes `dataset_import.corpus_path`.
 - request `schema_path` becomes `dataset_import.schema_path`.
 - `dataset_import.corpus` becomes `build_graph.corpus_path`.
-- `dataset_import.schema` becomes `build_graph.schema_path`.
+- `dataset_import.schema` becomes `build_graph.schema_path`; if the workflow
+  uses a default schema fallback, that fallback must be explicit in the step
+  artifact metadata.
 - `build_graph.graph`, `build_graph.chunks`, and `build_graph.cache` become
   final workflow output artifacts.
 

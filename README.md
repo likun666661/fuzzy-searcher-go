@@ -65,6 +65,8 @@ surfaces:
 - `GET /v1/datasets`
 - `POST /v1/datasets/import`
 - `GET /v1/datasets/{dataset}`
+- `GET /v1/datasets/{dataset}/schema`
+- `PUT /v1/datasets/{dataset}/schema`
 - `DELETE /v1/datasets/{dataset}`
 - `POST /v1/datasets/{dataset}/rebuild`
 - `GET /v1/datasets/{dataset}/artifacts`
@@ -220,6 +222,7 @@ Dataset and artifact registry endpoints report what the service can see:
 ```bash
 curl -s http://127.0.0.1:8080/v1/datasets
 curl -s http://127.0.0.1:8080/v1/datasets/demo/artifacts
+curl -s http://127.0.0.1:8080/v1/datasets/demo/schema
 ```
 
 Dataset lifecycle operations are recorded separately so operators can audit
@@ -251,6 +254,12 @@ The import copies files into `data/uploaded/<dataset>/corpus.json` and
 `schemas/<dataset>.json`, writes `dataset-import/v1` metadata under
 `output/datasets`, and makes the dataset visible to existing registry and
 `build_graph` paths. See `docs/contracts/dataset_import.md`.
+
+Schemas can also be managed directly through
+`GET/PUT /v1/datasets/{dataset}/schema` and `POST /v1/schemas/validate`.
+The schema management contract, validation rules, version/hash metadata, and
+default fallback semantics are documented in
+`docs/contracts/schema_management.md`.
 
 To delete a service-managed dataset and its managed outputs:
 
@@ -471,5 +480,6 @@ contracts are documented in `docs/contracts/generate_golden_worker.md`,
 `docs/contracts/build_graph_worker.md`, and
 `docs/contracts/answer_worker.md`. The Phase 9 Go-native path1 raw candidate
 parity contract is documented in `docs/contracts/path1_candidate_generation.md`.
-The Phase 14 workflow contract is documented in
-`docs/contracts/workflows.md`.
+The Phase 14 workflow contract is documented in `docs/contracts/workflows.md`.
+Dataset schema management is documented in
+`docs/contracts/schema_management.md`.

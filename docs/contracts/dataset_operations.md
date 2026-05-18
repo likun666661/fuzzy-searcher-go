@@ -42,7 +42,8 @@ Stable fields:
 - `schema_version`: current value is `dataset-operation/v1`.
 - `id`: service-assigned operation id.
 - `dataset`: dataset name.
-- `type`: one of `import`, `create_dataset`, `rebuild`, `delete`.
+- `type`: one of `import`, `create_dataset`, `rebuild`, `delete`, or
+  `schema_update`.
 - `status`: `planned`, `running`, `succeeded`, `failed`, or `canceled`.
 - `created_at`: operation record creation time.
 - `finished_at`: terminal time when known.
@@ -159,6 +160,26 @@ Status:
 - `succeeded` when status is `deleted`;
 - `planned` when `dry_run=true`;
 - `failed` when deletion status is `failed` or the API returns an error.
+
+### schema_update
+
+Created by `PUT /v1/datasets/{dataset}/schema` once schema operation history is
+enabled.
+
+Expected refs:
+
+- no job refs;
+- no workflow refs.
+
+Artifacts:
+
+- `schema`
+- `schema_metadata`
+
+Status:
+
+- `succeeded` when schema upload returns `dataset-schema-update/v1`;
+- `failed` when schema validation or metadata write fails.
 
 ## API Surface
 

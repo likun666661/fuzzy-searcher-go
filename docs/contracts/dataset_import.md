@@ -7,6 +7,10 @@ with a smaller, stable boundary: import an already prepared corpus JSON and
 schema JSON into service-managed artifact roots, persist metadata, and make the
 dataset visible to the existing artifact registry and `build_graph` workflow.
 
+Phase 23 promotes schemas into a first-class managed artifact. Import must use
+the same schema shape and validation rules defined in
+`docs/contracts/schema_management.md`.
+
 ## Endpoint
 
 ```http
@@ -82,6 +86,7 @@ The service copies source files into:
 - corpus: `$YOUTU_RAG_CORPUS_ROOT/uploaded/<dataset>/corpus.json`
 - schema: `$YOUTU_RAG_SCHEMA_ROOT/<dataset>.json`
 - metadata: `$YOUTU_RAG_DATASET_META_ROOT/<dataset>.json`
+- schema metadata: `$YOUTU_RAG_DATASET_META_ROOT/<dataset>.schema.json`
 
 `YOUTU_RAG_DATASET_META_ROOT` defaults to
 `$YOUTU_RAG_ARTIFACT_ROOT/output/datasets`.
@@ -97,6 +102,10 @@ curl -s http://127.0.0.1:8080/v1/datasets/news_2026/artifacts
 
 The imported dataset is expected to be `schema_ready`: corpus and schema exist,
 while graph/chunks/cache are still missing until `build_graph` runs.
+
+The schema artifact should include validation status, version, and hash as
+defined in `docs/contracts/schema_management.md`. Bad schema input must fail
+before import commits managed corpus/schema/metadata.
 
 The existing `build_graph` job and `build_and_answer` workflow resolve the
 imported corpus/schema paths from the artifact registry. No Python graph
@@ -128,6 +137,8 @@ Stable error codes:
 - No multipart upload yet.
 - No PDF/DOCX/TXT parsing yet.
 - No schema editor yet.
+- Direct schema read/upload/validate APIs are defined separately in
+  `docs/contracts/schema_management.md`.
 - No automatic graph build. Import only prepares corpus/schema artifacts; graph
   construction remains a separate job/workflow step.
 - No dataset deletion in the import endpoint. Managed dataset cleanup is defined

@@ -52,6 +52,11 @@ The persisted `job.spec` must contain the resolved worker command fields used by
 the runner, including `python_bin`, `script_path`, `working_dir`,
 `graph_output_path`, and `chunks_output_path`.
 
+`schema_path` should be the managed schema path resolved by the service, not an
+arbitrary worker-discovered file. If a default schema fallback is used, the job
+spec or artifacts must record `fallback=true`. See
+`docs/contracts/schema_management.md`.
+
 ## Service Configuration
 
 | Config | Environment | Default |
