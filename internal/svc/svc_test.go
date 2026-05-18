@@ -2159,6 +2159,133 @@ print("benchmark ok")
 	}
 }
 
+func TestBenchmarkJobProgressCheckpointAndConcurrency(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	outputPath := filepath.Join(dir, "output", "benchmarks", "anony_eng.json")
+	progressPath := filepath.Join(dir, "output", "benchmarks", "anony_eng.progress.json")
+	checkpointPath := filepath.Join(dir, "output", "benchmarks", "anony_eng.checkpoint.jsonl")
+	qaPath := filepath.Join(dir, "data", "anony_eng", "final_qa_pairs.json")
+	jobRoot := filepath.Join(dir, "jobs")
+	mustWrite(t, qaPath, `[{"id":"qa_1","question":"Q?","answer":"A"}]`)
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import json
+import os
+import sys
+
+def value(flag):
+    return sys.argv[sys.argv.index(flag) + 1]
+
+dataset = value("--dataset")
+out = value("--output")
+progress = value("--progress")
+checkpoint = value("--checkpoint")
+concurrency = int(value("--concurrency"))
+assert concurrency == 3
+assert value("--checkpoint-every") == "1"
+os.makedirs(os.path.dirname(out), exist_ok=True)
+payload = {
+    "schema_version": "benchmark-progress/v1",
+    "dataset": dataset,
+    "status": "succeeded",
+    "total": 1,
+    "completed": 1,
+    "running": 0,
+    "correct_count": 1,
+    "failed_count": 0,
+    "accuracy_so_far": 1.0,
+    "concurrency": concurrency,
+    "checkpoint_path": checkpoint,
+}
+with open(progress, "w", encoding="utf-8") as f:
+    json.dump(payload, f)
+with open(checkpoint, "w", encoding="utf-8") as f:
+    json.dump({"schema_version": "benchmark-checkpoint-item/v1", "id": "qa_1", "judge": "1", "correct": True}, f)
+    f.write("\n")
+with open(out, "w", encoding="utf-8") as f:
+    json.dump({
+        "schema_version": "benchmark-result/v1",
+        "dataset": dataset,
+        "question_count": 1,
+        "correct_count": 1,
+        "accuracy": 1.0,
+        "items": [{"id": "qa_1", "judge": "1", "correct": True}],
+    }, f)
+`)
+	cfg := config.Config{
+		DefaultDataset:  "demo",
+		DefaultMode:     "noagent",
+		ArtifactRoot:    dir,
+		CorpusRoot:      filepath.Join(dir, "data"),
+		JobRoot:         jobRoot,
+		PythonBin:       "python3",
+		BenchmarkScript: scriptPath,
+		WorkerCWD:       dir,
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	body := bytes.NewBufferString(`{"type":"benchmark","benchmark":{"dataset":"anony_eng","qa_path":` + quote(qaPath) + `,"output_path":` + quote(outputPath) + `,"progress_path":` + quote(progressPath) + `,"checkpoint_path":` + quote(checkpointPath) + `,"limit":1,"concurrency":3,"checkpoint_every":1}}`)
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create benchmark status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created benchmark job: %v", err)
+	}
+	spec, _ := created["spec"].(map[string]any)
+	if spec["progress_path"] != progressPath || spec["checkpoint_path"] != checkpointPath ||
+		spec["concurrency"].(float64) != 3 {
+		t.Fatalf("created benchmark spec = %#v", spec)
+	}
+
+	job := waitForServiceJob(t, routes, created["id"].(string), "succeeded")
+	result, _ := job["result"].(map[string]any)
+	if result["progress_path"] != progressPath || result["accuracy"].(float64) != 1.0 {
+		t.Fatalf("benchmark result = %#v", result)
+	}
+	for _, name := range []string{"benchmark_result", "benchmark_progress", "benchmark_checkpoint"} {
+		if !containsArtifactStatus(job, name, "written") {
+			t.Fatalf("benchmark artifacts missing %s written: %#v", name, job["artifacts"])
+		}
+	}
+	for _, path := range []string{outputPath, progressPath, checkpointPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected benchmark artifact missing %s: %v", path, err)
+		}
+	}
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created["id"].(string)+"/events", nil))
+	if events.Code != http.StatusOK ||
+		!strings.Contains(events.Body.String(), `"benchmark_progress"`) ||
+		!strings.Contains(events.Body.String(), `concurrency`) {
+		t.Fatalf("benchmark events status = %d, body = %s", events.Code, events.Body.String())
+	}
+
+	restarted := svc.NewService(cfg)
+	restartedRoutes := restarted.Routes()
+	get := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created["id"].(string), nil))
+	if get.Code != http.StatusOK {
+		t.Fatalf("reloaded benchmark job status = %d, body = %s", get.Code, get.Body.String())
+	}
+	var reloaded map[string]any
+	if err := json.Unmarshal(get.Body.Bytes(), &reloaded); err != nil {
+		t.Fatalf("decode reloaded benchmark job: %v", err)
+	}
+	if !containsArtifactStatus(reloaded, "benchmark_progress", "written") ||
+		!containsArtifactStatus(reloaded, "benchmark_checkpoint", "written") {
+		t.Fatalf("reloaded benchmark artifacts = %#v", reloaded["artifacts"])
+	}
+	reloadedEvents := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(reloadedEvents, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created["id"].(string)+"/events", nil))
+	if reloadedEvents.Code != http.StatusOK || !strings.Contains(reloadedEvents.Body.String(), `"benchmark_progress"`) {
+		t.Fatalf("reloaded benchmark events status = %d, body = %s", reloadedEvents.Code, reloadedEvents.Body.String())
+	}
+}
+
 func TestBenchmarkWorkflowEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "worker.py")

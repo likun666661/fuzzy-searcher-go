@@ -1082,6 +1082,9 @@ func (s *Service) submitBenchmarkJob(spec jobs.BenchmarkSpec) jobs.Job {
 			ScriptPath: spec.ScriptPath,
 			WorkingDir: spec.WorkingDir,
 		}, spec)
+		if spec.ProgressPath != "" {
+			recordBenchmarkProgressFile(recorder, spec.ProgressPath)
+		}
 		if err == nil {
 			recorder.Artifact("benchmark_result", "written", result.OutputPath)
 			recorder.Artifact("benchmark_progress", "written", result.ProgressPath)
@@ -1120,6 +1123,17 @@ func (s *Service) watchBenchmarkProgress(ctx context.Context, recorder *jobs.Rec
 			lastMessage = message
 			recorder.Progress(message)
 		}
+	}
+}
+
+func recordBenchmarkProgressFile(recorder *jobs.Recorder, path string) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	message := strings.TrimSpace(string(body))
+	if message != "" {
+		recorder.Progress(message)
 	}
 }
 
