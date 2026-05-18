@@ -8,6 +8,7 @@ Usage: scripts/run_service_local.sh [--check-only]
 Runs the Go Youtu-RAG service with local/demo defaults.
 
 Common overrides:
+  ENV_FILE=.env
   YOUTU_RAG_PROFILE=local|demo|production
   YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag
   YOUTU_RAG_GRAPH=/abs/path/youtu-graphrag/output/graphs/demo_new.json
@@ -36,6 +37,13 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+ENV_FILE="${ENV_FILE:-.env}"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  . "$ENV_FILE"
+  set +a
+fi
 
 : "${YOUTU_RAG_PROFILE:=demo}"
 : "${YOUTU_RAG_ARTIFACT_ROOT:=../youtu-graphrag}"
