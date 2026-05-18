@@ -36,6 +36,8 @@ These tests exercise HTTP handlers as clients see them.
 Required coverage:
 
 - `/healthz`, `/readyz`, `/v1/version`.
+- Service profile validation via `service-config-check/v1`, including missing
+  artifact, worker, and sidecar diagnostics.
 - `/v1/retrieve` validation, supported modes, unsupported modes.
 - `/v1/datasets`, `/v1/datasets/{dataset}`,
   `/v1/datasets/{dataset}/artifacts`.
@@ -46,6 +48,9 @@ Required coverage:
 Gate rule: client-correctable errors should return 4xx with a stable error
 envelope; missing runtime dependencies should be explicit and must not look like
 random 500s.
+
+Profile/startup validation rules are documented in
+`docs/contracts/service_profile.md`.
 
 ### 2. Retriever Parity Gates
 
@@ -167,4 +172,3 @@ For every service phase:
 - Is failure observable through status/error JSON?
 - Does `make test` pass?
 - Do existing demo gates remain green?
-

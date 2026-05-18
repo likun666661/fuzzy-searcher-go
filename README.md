@@ -55,7 +55,9 @@ go test ./...
 The long-running service entrypoint follows the `ggsrv-layout` shape at a
 lighter weight: `cmd/youtu-rag-service` owns process startup, `internal/config`
 owns environment configuration, and `internal/svc` owns HTTP request handling.
-It currently exposes the first service milestone:
+Service profile and startup validation semantics are documented in
+`docs/contracts/service_profile.md`. It currently exposes these service
+surfaces:
 
 - `GET /healthz`
 - `GET /readyz`
@@ -81,9 +83,31 @@ It currently exposes the first service milestone:
 - `GET /v1/workflows/{workflow_id}/events`
 - `POST /v1/workflows/{workflow_id}/cancel`
 
-Run it with explicit demo artifacts:
+Before starting a long-running process, validate the selected service profile:
 
 ```bash
+YOUTU_RAG_PROFILE=demo \
+YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag \
+YOUTU_RAG_GRAPH=/abs/path/youtu-graphrag/output/graphs/demo_new.json \
+YOUTU_RAG_CHUNKS=/abs/path/youtu-graphrag/output/chunks/demo.txt \
+YOUTU_RAG_SIDECAR_URL=http://127.0.0.1:8765 \
+YOUTU_RAG_MODE=native-path1-rerank \
+make service-check
+```
+
+The `--check-config` report uses `service-config-check/v1` and exits non-zero
+when a required profile dependency is missing. Profiles are:
+
+- `local`: permissive developer default; warns on missing optional paths.
+- `demo`: requires demo graph/chunks artifacts and sidecar when the mode needs
+  one.
+- `production`: requires artifact root, sidecar URL, worker cwd, Python binary,
+  and all configured worker scripts.
+
+Run the service with explicit demo artifacts:
+
+```bash
+YOUTU_RAG_PROFILE=demo \
 YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag \
 YOUTU_RAG_GRAPH=/abs/path/youtu-graphrag/output/graphs/demo_new.json \
 YOUTU_RAG_CHUNKS=/abs/path/youtu-graphrag/output/chunks/demo.txt \
@@ -91,6 +115,17 @@ YOUTU_RAG_SIDECAR_URL=http://127.0.0.1:8765 \
 YOUTU_RAG_MODE=native-path1-rerank \
 make service-run
 ```
+
+For the same demo defaults plus startup validation, use:
+
+```bash
+YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag \
+YOUTU_RAG_SIDECAR_URL=http://127.0.0.1:8765 \
+make service-local
+```
+
+Set `YOUTU_RAG_VALIDATE_ON_START=true` to make `make service-run` fail before
+binding HTTP when the current profile is not ready.
 
 Then call the retrieve API:
 
