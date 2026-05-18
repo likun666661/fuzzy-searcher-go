@@ -145,7 +145,11 @@ import, retrieve, async retrieve job, and job events. Use
 For a real demo smoke that uses the sibling `youtu-graphrag` demo graph,
 chunks, FAISS cache, and Python vector sidecar, see
 `docs/contracts/real_demo_smoke.md`. That smoke validates real retrieval through
-the Go HTTP service without requiring an LLM API key.
+the Go HTTP service without requiring an LLM API key:
+
+```bash
+YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag make demo-service-smoke
+```
 
 Set `YOUTU_RAG_VALIDATE_ON_START=true` to make `make service-run` fail before
 binding HTTP when the current profile is not ready.

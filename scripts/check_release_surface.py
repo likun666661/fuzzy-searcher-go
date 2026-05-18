@@ -69,6 +69,14 @@ SCRIPT_EXPECTATIONS = {
         "--check-only",
         "--check-config",
     ],
+    "scripts/run_demo_service_smoke.sh": [
+        "Usage: scripts/run_demo_service_smoke.sh",
+        "YOUTU_RAG_ARTIFACT_ROOT",
+        "/v1/sidecars/vector/health",
+        "/v1/retrieve",
+        "/v1/jobs",
+        "real demo service smoke passed",
+    ],
     ".env.example": [
         "YOUTU_RAG_PROFILE=demo",
         "YOUTU_RAG_ARTIFACT_ROOT=../youtu-graphrag",
@@ -123,6 +131,12 @@ def main() -> int:
     makefile = (root / "Makefile").read_text(encoding="utf-8") if (root / "Makefile").exists() else ""
     require("service-smoke:" in makefile, "Makefile missing service-smoke target", errors)
     require("scripts/run_service_smoke.sh" in makefile, "service-smoke must call scripts/run_service_smoke.sh", errors)
+    require("demo-service-smoke:" in makefile, "Makefile missing demo-service-smoke target", errors)
+    require(
+        "scripts/run_demo_service_smoke.sh" in makefile,
+        "demo-service-smoke must call scripts/run_demo_service_smoke.sh",
+        errors,
+    )
 
     for relative, tokens in SCRIPT_EXPECTATIONS.items():
         path = root / relative
