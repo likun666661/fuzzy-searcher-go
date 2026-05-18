@@ -34,7 +34,8 @@ Stable fields:
 - `schema_version`: job envelope version. Current value is `service-job/v1`.
 - `id`: service-assigned job id.
 - `type`: job type. Current implemented types are `retrieve`,
-  `parse_documents`, `generate_golden`, `build_graph`, and `answer`.
+  `parse_documents`, `generate_golden`, `build_graph`, `answer`, and
+  `benchmark`.
 - `status`: one of `queued`, `running`, `succeeded`, `failed`, `canceled`.
 - `spec`: typed request payload for the job type.
 - `artifacts`: input/output artifact metadata.
@@ -359,6 +360,40 @@ itself remains on disk as the `answer` artifact.
 
 The detailed Python worker command contract is defined in
 `docs/contracts/answer_worker.md`.
+
+## Implemented Job: benchmark
+
+`benchmark` turns dataset QA evaluation into a tracked service job. Go owns the
+job envelope, lifecycle events, persistence, worker command execution,
+stdout/stderr capture, and artifact metadata. Python continues to own
+retrieval/answer/judge internals and LLM calls.
+
+Submit:
+
+```json
+{
+  "type": "benchmark",
+  "benchmark": {
+    "dataset": "anony_eng",
+    "qa_path": "/abs/path/youtu-graphrag/data/anony_eng/final_qa_pairs.json",
+    "output_path": "/abs/path/youtu-graphrag/output/benchmarks/anony_eng_smoke.json",
+    "limit": 20,
+    "mode": "noagent",
+    "top_k": 20,
+    "answer_model": "deepseek-v4-pro",
+    "judge_model": "deepseek-v4-pro",
+    "llm_base_url": "https://api.deepseek.com"
+  }
+}
+```
+
+Benchmark jobs report `qa` and optional graph/chunks/schema/cache input
+artifacts plus a `benchmark_result` output artifact with
+`schema_version=benchmark-result/v1`. Completed jobs return a compact inline
+`benchmark-job-result/v1` summary; the full item-level result stays on disk.
+
+The detailed Python worker and workflow contract is defined in
+`docs/contracts/benchmark_worker.md`.
 
 ## Persistence
 

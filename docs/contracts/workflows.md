@@ -1,8 +1,8 @@
 # Workflow Contract
 
 Workflows sit above service jobs. A job runs one unit of work, such as
-`parse_documents`, `build_graph`, or `answer`. A workflow coordinates multiple
-jobs and service operations into a product
+`parse_documents`, `build_graph`, `answer`, or `benchmark`. A workflow
+coordinates multiple jobs and service operations into a product
 operation with explicit step status, child job references, artifact handoff,
 failure semantics, cancellation, and restart behavior.
 
@@ -144,6 +144,44 @@ configured artifact roots when optional paths are omitted.
 The detailed `create_dataset` workflow contract is defined in
 `docs/contracts/create_dataset_workflow.md`.
 
+## Implemented Workflow: benchmark
+
+`benchmark` evaluates a dataset QA file and writes a
+`benchmark-result/v1` artifact. It can run as a single benchmark child job, or
+optionally build graph/chunks/cache first and hand those artifacts to the
+benchmark job:
+
+```text
+benchmark
+```
+
+or:
+
+```text
+build_graph -> benchmark
+```
+
+Submit:
+
+```json
+{
+  "type": "benchmark",
+  "benchmark": {
+    "dataset": "anony_eng",
+    "qa_path": "/abs/path/youtu-graphrag/data/anony_eng/final_qa_pairs.json",
+    "limit": 20,
+    "build_first": false,
+    "mode": "noagent",
+    "top_k": 20,
+    "answer_model": "deepseek-v4-pro",
+    "judge_model": "deepseek-v4-pro"
+  }
+}
+```
+
+The detailed benchmark job/workflow contract is defined in
+`docs/contracts/benchmark_worker.md`.
+
 ## Artifact Handoff
 
 The workflow must record how artifacts move between steps.
@@ -165,6 +203,12 @@ For `create_dataset`:
   `build_graph.corpus_path` and `build_graph.schema_path`.
 - `build_graph.graph`, `build_graph.chunks`, and `build_graph.cache` become
   final workflow output artifacts.
+
+For `benchmark`:
+
+- `build_graph.graph`, `build_graph.chunks`, and `build_graph.cache` become
+  benchmark inputs when `build_first=true`.
+- `benchmark.benchmark_result` becomes the final workflow output artifact.
 
 The handoff is part of the contract. Tests should not need to infer it from
 filesystem paths alone.

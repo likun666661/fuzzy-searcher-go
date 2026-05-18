@@ -253,7 +253,7 @@ curl -s http://127.0.0.1:8080/v1/jobs \
 ```
 
 Other job types use the same endpoint: `retrieve`, `generate_golden`,
-`build_graph`, and `answer`.
+`build_graph`, `answer`, and `benchmark`.
 
 Dataset and artifact registry endpoints report what the service can see:
 
@@ -520,7 +520,9 @@ contracts are documented in `docs/contracts/generate_golden_worker.md`,
 parity contract is documented in `docs/contracts/path1_candidate_generation.md`.
 The Phase 14 workflow contract is documented in `docs/contracts/workflows.md`.
 Dataset schema management is documented in
-`docs/contracts/schema_management.md`.
+`docs/contracts/schema_management.md`. Dataset benchmark service contracts are
+documented in `docs/contracts/benchmark_worker.md`, with operator guidance in
+`docs/benchmark_guide.md`.
 
 ## Dataset Benchmarking
 

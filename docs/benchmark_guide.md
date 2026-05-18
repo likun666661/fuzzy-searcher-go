@@ -71,7 +71,8 @@ AnonyRAG 这种数据集上效果怎么样？”
 4. 每道题都留下 job/operation 记录。
 5. 输出一个 `benchmark-result/v1` artifact。
 
-这层还需要新增；现在只能手动把已有 `answer`/`retrieve` job 拼起来。
+这层从 Phase 26 开始服务化：benchmark job/workflow 的稳定合同在
+`docs/contracts/benchmark_worker.md`。
 
 ## 2. 官方可用的数据集线索
 
@@ -287,7 +288,7 @@ python main.py \
 
 但它还缺一个一键 batch benchmark 的上层对象。
 
-建议新增：
+Phase 26 的目标合同：
 
 ```json
 {
@@ -344,3 +345,17 @@ python main.py \
 这样做的收益是：以后换数据集、换模型、换 judge，都不用临时写脚本，只改 job
 spec。
 
+## 8. DeepSeek / API key 处理原则
+
+真实模型 benchmark 优先使用 DeepSeek，但 key 只通过环境变量传给 Python
+worker：
+
+```bash
+export LLM_API_KEY="${DEEPSEEK_API_KEY}"
+export LLM_BASE_URL="https://api.deepseek.com"
+export LLM_MODEL="deepseek-v4-pro"
+```
+
+Go service 的 job spec/result/artifact/event 只能记录 model id、base URL、
+question count、accuracy 等非敏感信息；不能记录或打印 key。缺 key 时，job
+应该失败成 `benchmark_llm_unconfigured` 这类可诊断错误。
