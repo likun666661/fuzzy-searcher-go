@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fuzzy-searcher-go/internal/config"
-	"github.com/fuzzy-searcher-go/internal/jobs"
-	"github.com/fuzzy-searcher-go/internal/schemas"
+	"github.com/likun666661/youtu-rag-service/internal/config"
+	"github.com/likun666661/youtu-rag-service/internal/jobs"
+	"github.com/likun666661/youtu-rag-service/internal/schemas"
 )
 
 const SchemaVersion = "dataset-import/v1"

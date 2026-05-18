@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/fuzzy-searcher-go/internal/artifacts"
-	"github.com/fuzzy-searcher-go/internal/config"
+	"github.com/likun666661/youtu-rag-service/internal/artifacts"
+	"github.com/likun666661/youtu-rag-service/internal/config"
 )
 
 func TestRegistryDiscoversDatasetAndStatus(t *testing.T) {

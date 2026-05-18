@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/fuzzy-searcher-go/internal/jobs"
+	"github.com/likun666661/youtu-rag-service/internal/jobs"
 )
 
 // ErrMissingOutput means the worker exited successfully but did not write the

@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/fuzzy-searcher-go/internal/datasetops"
-	"github.com/fuzzy-searcher-go/internal/jobs"
+	"github.com/likun666661/youtu-rag-service/internal/datasetops"
+	"github.com/likun666661/youtu-rag-service/internal/jobs"
 )
 
 func TestStorePersistsAndFiltersOperations(t *testing.T) {

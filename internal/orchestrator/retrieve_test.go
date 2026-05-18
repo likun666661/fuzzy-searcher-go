@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/fuzzy-searcher-go/internal/config"
-	"github.com/fuzzy-searcher-go/internal/orchestrator"
+	"github.com/likun666661/youtu-rag-service/internal/config"
+	"github.com/likun666661/youtu-rag-service/internal/orchestrator"
 )
 
 func TestRetrieveRejectsMissingArtifacts(t *testing.T) {

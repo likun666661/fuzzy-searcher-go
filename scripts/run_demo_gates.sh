@@ -10,7 +10,7 @@ DEFAULT_QUESTION="When was the person who Messi's goals in Copa del Rey compared
 QUESTION="${QUESTION:-$DEFAULT_QUESTION}"
 TOP_K="${TOP_K:-20}"
 DATASET="${DATASET:-demo}"
-OUT_DIR="${OUT_DIR:-/tmp/fuzzy-searcher-go-demo-gates}"
+OUT_DIR="${OUT_DIR:-/tmp/youtu-rag-service-demo-gates}"
 MODES="${MODES:-runtime-trace primitive-merge rerank-merge native-path1-rerank}"
 
 mkdir -p "$OUT_DIR"

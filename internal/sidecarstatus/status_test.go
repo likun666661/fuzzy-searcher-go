@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/fuzzy-searcher-go/internal/config"
-	"github.com/fuzzy-searcher-go/internal/sidecarstatus"
+	"github.com/likun666661/youtu-rag-service/internal/config"
+	"github.com/likun666661/youtu-rag-service/internal/sidecarstatus"
 )
 
 func TestVectorUnconfigured(t *testing.T) {

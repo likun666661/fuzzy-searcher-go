@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fuzzy-searcher-go/internal/jobs"
-	"github.com/fuzzy-searcher-go/internal/workers/golden"
+	"github.com/likun666661/youtu-rag-service/internal/jobs"
+	"github.com/likun666661/youtu-rag-service/internal/workers/golden"
 )
 
 func TestRunExecutesPythonWorker(t *testing.T) {

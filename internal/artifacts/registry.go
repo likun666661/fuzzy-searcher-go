@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fuzzy-searcher-go/internal/config"
-	"github.com/fuzzy-searcher-go/internal/schemas"
+	"github.com/likun666661/youtu-rag-service/internal/config"
+	"github.com/likun666661/youtu-rag-service/internal/schemas"
 )
 
 // Registry maps Youtu-RAG datasets to their filesystem artifacts.

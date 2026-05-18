@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/likun666661/fuzzy-searcher-go/docs/contracts/retrieve_result.schema.json",
+  "$id": "https://github.com/likun666661/youtu-rag-service/docs/contracts/retrieve_result.schema.json",
   "title": "RetrieveResult",
   "type": "object",
   "additionalProperties": true,

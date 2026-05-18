@@ -15,7 +15,7 @@ The default local layout is sibling directories:
 
 ```text
 workspace-for-youtu-graph/
-  fuzzy-searcher-go/
+  youtu-rag-service/
   youtu-graphrag/
 ```
 

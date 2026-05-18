@@ -2,7 +2,7 @@
 
 这份文档回答一个问题：
 
-> 已经有了 `fuzzy-searcher-go` 这一阶段成果之后，如果不追求把所有 Python 都翻译成 Go，而是允许保留一部分 Python，我们后面怎么把整个 Youtu-RAG 做成一个长期可运行、可维护、可扩展的服务？
+> 已经有了 `youtu-rag-service` 这一阶段成果之后，如果不追求把所有 Python 都翻译成 Go，而是允许保留一部分 Python，我们后面怎么把整个 Youtu-RAG 做成一个长期可运行、可维护、可扩展的服务？
 
 结论先说清楚：
 
@@ -21,7 +21,7 @@
 
 当前 public repo：
 
-<https://github.com/likun666661/fuzzy-searcher-go>
+<https://github.com/likun666661/youtu-rag-service>
 
 当前 Go 侧已经做到：
 

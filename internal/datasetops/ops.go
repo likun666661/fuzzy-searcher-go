@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/fuzzy-searcher-go/internal/jobs"
+	"github.com/likun666661/youtu-rag-service/internal/jobs"
 )
 
 // ErrNotFound means an operation id is unknown.

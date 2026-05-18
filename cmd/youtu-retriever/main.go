@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fuzzy-searcher-go/internal/chunks"
-	"github.com/fuzzy-searcher-go/internal/dataset"
-	"github.com/fuzzy-searcher-go/internal/retrieval"
-	"github.com/fuzzy-searcher-go/internal/sidecar"
+	"github.com/likun666661/youtu-rag-service/internal/chunks"
+	"github.com/likun666661/youtu-rag-service/internal/dataset"
+	"github.com/likun666661/youtu-rag-service/internal/retrieval"
+	"github.com/likun666661/youtu-rag-service/internal/sidecar"
 )
 
 func main() {

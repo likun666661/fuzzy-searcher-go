@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fuzzy-searcher-go/internal/config"
+	"github.com/likun666661/youtu-rag-service/internal/config"
 )
 
 func TestLoadParsesServiceEnvironment(t *testing.T) {

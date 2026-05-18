@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/fuzzy-searcher-go/internal/dataset"
+	"github.com/likun666661/youtu-rag-service/internal/dataset"
 )
 
 // NodeText produces the text representation of a graph node,

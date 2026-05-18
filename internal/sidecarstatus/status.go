@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/fuzzy-searcher-go/internal/config"
-	"github.com/fuzzy-searcher-go/internal/sidecar"
+	"github.com/likun666661/youtu-rag-service/internal/config"
+	"github.com/likun666661/youtu-rag-service/internal/sidecar"
 )
 
 // Status reports the service's view of one sidecar dependency.

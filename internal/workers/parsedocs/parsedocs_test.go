@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fuzzy-searcher-go/internal/jobs"
-	"github.com/fuzzy-searcher-go/internal/workers/parsedocs"
+	"github.com/likun666661/youtu-rag-service/internal/jobs"
+	"github.com/likun666661/youtu-rag-service/internal/workers/parsedocs"
 )
 
 func TestRunWritesCorpusOutput(t *testing.T) {

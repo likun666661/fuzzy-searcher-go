@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fuzzy-searcher-go/internal/jobs"
+	"github.com/likun666661/youtu-rag-service/internal/jobs"
 )
 
 func TestManagerSubmitSuccess(t *testing.T) {

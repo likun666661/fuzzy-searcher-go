@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/fuzzy-searcher-go/internal/chunks"
+	"github.com/likun666661/youtu-rag-service/internal/chunks"
 )
 
 func TestLoadChunks(t *testing.T) {

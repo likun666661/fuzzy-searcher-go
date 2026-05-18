@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/fuzzy-searcher-go/internal/dataset"
-	"github.com/fuzzy-searcher-go/internal/graphtext"
+	"github.com/likun666661/youtu-rag-service/internal/dataset"
+	"github.com/likun666661/youtu-rag-service/internal/graphtext"
 )
 
 const (

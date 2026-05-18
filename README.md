@@ -1,37 +1,49 @@
-# fuzzy-searcher-go
+# youtu-rag-service
 
-Go retriever scaffold for the Youtu-GraphRAG migration.
+Long-running Go service for operating Youtu-RAG.
 
-This repository is an incremental Go migration of the large Python retriever
-core. The current implementation can run through several migration modes:
+This repository started as a small Go retriever migration, but it is now the
+service shell around the original Python Youtu-RAG stack. Go owns the stable
+HTTP API, configuration, dataset registry, job/workflow lifecycle, artifact
+metadata, persistence, release checks, and local smoke scripts. Python remains
+the model-heavy worker/sidecar layer for embedding/FAISS primitives, graph
+construction, document parsing, and LLM answer generation.
 
-- native Go graph/chunk loading with Python vector sidecar support
-- trace-backed parity mode, where Python emits an authoritative
-  `triple-trace/v1` file and Go uses it to match the current Python public
-  retrieval output exactly
+Current service capabilities:
 
-- load Youtu-GraphRAG graph JSON and chunk files
-- expose a stable `RetrieveRequest` / `RetrieveResult` contract
-- provide a deterministic Go retriever core
-- consume Python sidecar chunk/triple retrieval output
-- provide a CLI for black-box comparison against Python golden fixtures/traces
-- provide harness/docs for migration testing
+- HTTP service: health, readiness, version, retrieve, jobs, workflows,
+  sidecar health, datasets, schemas, artifacts, and operation history.
+- Dataset lifecycle: import prepared corpus/schema files, create datasets from
+  documents, rebuild graph/chunks/cache, delete managed datasets safely, and
+  audit operations after restart.
+- Workers and workflows: `retrieve`, `parse_documents`, `generate_golden`,
+  `build_graph`, `answer`, `build_and_answer`, and `create_dataset`.
+- Retriever parity: Go-native graph/chunk loading and path1 candidate
+  generation, with Python sidecar primitives for vector retrieval/reranking.
+- Release surface: OpenAPI contract, profile/env validation, `.env.example`,
+  fake service smoke, real demo retrieval smoke, and regression gates.
 
-The trace-backed path is intentionally a migration bridge. It keeps the public
-contract green while native Go path1/path2 triple rerank behavior is replaced
-piece by piece.
+The important architecture decision is intentional: this is not a full rewrite
+of every Python model component into Go. The maintainable boundary is Go for
+service orchestration and Python for model-heavy execution.
 
 ## Layout
 
 ```text
 cmd/youtu-retriever/          CLI entrypoint
+cmd/youtu-rag-service/        Long-running HTTP service entrypoint
 internal/dataset/             Graph loaders
 internal/chunks/              output/chunks/*.txt loader
+internal/config/              Environment-backed service configuration
+internal/svc/                 HTTP routing and service orchestration
+internal/jobs/                File-backed async job records
+internal/workflows/           File-backed workflow records
+internal/workers/             Python worker command wrappers
 internal/graphtext/           Python-parity node text helpers
 internal/retrieval/           Retrieve contract and deterministic core
-scripts/                      Oracle export and golden comparison scripts
-docs/                         Migration test plan
-docs/contracts/               JSON/schema and sidecar primitive contracts
+scripts/                      Smoke, gate, oracle, and comparison scripts
+docs/                         Architecture, roadmap, release, and test docs
+docs/contracts/               Service/API/worker/workflow contracts
 testdata/                     Phase 1 oracle fixtures
 ```
 
@@ -329,7 +341,7 @@ If the Python sidecar is running, run the demo parity gates:
 SIDECAR_URL=http://127.0.0.1:8765 scripts/run_demo_gates.sh
 ```
 
-The default demo gate paths assume `fuzzy-searcher-go` and `youtu-graphrag`
+The default demo gate paths assume `youtu-rag-service` and `youtu-graphrag`
 are sibling directories. From a clean clone elsewhere, pass explicit artifact
 paths:
 

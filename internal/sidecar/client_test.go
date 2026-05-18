@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/fuzzy-searcher-go/internal/sidecar"
+	"github.com/likun666661/youtu-rag-service/internal/sidecar"
 )
 
 func TestTripleTrace(t *testing.T) {

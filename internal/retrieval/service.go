@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fuzzy-searcher-go/internal/chunks"
-	"github.com/fuzzy-searcher-go/internal/dataset"
-	"github.com/fuzzy-searcher-go/internal/graphtext"
-	"github.com/fuzzy-searcher-go/internal/sidecar"
+	"github.com/likun666661/youtu-rag-service/internal/chunks"
+	"github.com/likun666661/youtu-rag-service/internal/dataset"
+	"github.com/likun666661/youtu-rag-service/internal/graphtext"
+	"github.com/likun666661/youtu-rag-service/internal/sidecar"
 )
 
 // Service is a phase-1 deterministic retriever core.
