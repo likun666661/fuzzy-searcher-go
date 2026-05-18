@@ -157,6 +157,18 @@ Successful worker execution requires `output_path` to exist and parse as
   "correct_count": 14,
   "failed_count": 0,
   "accuracy": 0.7,
+  "anonymized_mapping": {
+    "schema_version": "anonymized-mapping-summary/v1",
+    "applicable_count": 20,
+    "expected_count": 82,
+    "predicted_count": 80,
+    "matched_count": 70,
+    "exact_matched_count": 58,
+    "precision": 0.875,
+    "recall": 0.8537,
+    "f1": 0.8642,
+    "exact_recall": 0.7073
+  },
   "started_at": "2026-05-18T00:00:00Z",
   "finished_at": "2026-05-18T00:05:00Z",
   "duration_ms": 300000,
@@ -177,6 +189,21 @@ Successful worker execution requires `output_path` to exist and parse as
       "predicted_answer": "...",
       "judge": "1",
       "correct": true,
+      "mapping_score": {
+        "schema_version": "anonymized-mapping-score/v1",
+        "applicable": true,
+        "expected_count": 4,
+        "predicted_count": 4,
+        "matched_count": 3,
+        "exact_matched_count": 2,
+        "precision": 0.75,
+        "recall": 0.75,
+        "f1": 0.75,
+        "exact_recall": 0.5,
+        "missing_keys": ["PERSON#1"],
+        "extra_keys": [],
+        "by_key": {}
+      },
       "latency_ms": 11849,
       "error": ""
     }
@@ -196,6 +223,15 @@ Minimum required fields:
 `items` may contain extra fields such as retrieved triples/chunks, prompts,
 judge rationale, token usage, or cost estimates. Go should validate only the
 minimum schema at this layer.
+
+For AnonyRAG-style questions, the worker also emits deterministic anonymized
+mapping metrics. It extracts mappings such as `PERSON#370 -> 王进` from the
+gold and predicted answers, then reports item-level `mapping_score` and an
+aggregate `anonymized_mapping` summary. `matched_count` uses relaxed
+containment matching so answers like `洪信（即洪太尉）` can match `洪太尉`;
+`exact_matched_count` / `exact_recall` remain strict normalized string metrics.
+These metrics are advisory for generic benchmark jobs but should be preferred
+over a pure LLM judge when evaluating AnonyRAG entity restoration quality.
 
 ## Inline Job Result
 

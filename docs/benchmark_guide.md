@@ -316,10 +316,25 @@ python main.py \
 | graph config | construction mode, schema path, corpus path |
 | retrieval config | top_k, recall_paths, rerank flags |
 | answer metrics | correct count, accuracy, failed count |
+| AnonyRAG mapping metrics | mapping precision, recall, F1, exact recall |
 | system metrics | total time, average time/question, worker errors |
 | artifacts | graph path, chunks path, answer output, logs |
 
 不要只记录最后一个 accuracy。benchmark 复现最怕缺配置。
+
+AnonyRAG 的任务是恢复 `PERSON#xxx`、`LOCATION#xxx` 这类匿名实体，所以只看
+LLM judge 的 `accuracy` 不够稳。当前 service worker 会额外从 gold/predicted
+answer 里抽取匿名映射，输出 `anonymized_mapping` 聚合指标和每题
+`mapping_score`：
+
+- `precision`：预测出来的映射里有多少是对的；
+- `recall`：gold 映射里有多少被找回；
+- `f1`：precision/recall 的综合；
+- `exact_recall`：严格字符串完全一致的找回率。
+
+这组指标不会替代 LLM judge，但在评估匿名实体恢复质量时应该一起看。比如模型
+回答 `洪信（即洪太尉）`，LLM judge 可能判对；deterministic scorer 会在 relaxed
+`matched_count` 里算对，同时 strict `exact_recall` 会提醒它没有完全按 gold 名称输出。
 
 ## 6. 用 Go service 做 benchmark 时目前能做到什么
 

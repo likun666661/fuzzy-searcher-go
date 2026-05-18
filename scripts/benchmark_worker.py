@@ -118,6 +118,8 @@ def load_corpus(path: str) -> list[dict[str, str]]:
 
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_\-\[\]#]+|[\u4e00-\u9fff]{2,}")
+ANON_ID_RE = re.compile(r"\[?([A-Z][A-Z0-9_]*#[0-9]+)\]?")
+MAPPING_SEP_RE = re.compile(r"^\s*(?:[:：=]|[-–—]+|->|=>|→)+\s*")
 
 
 def tokenize(text: str) -> set[str]:
@@ -253,6 +255,87 @@ Predicted answer:
     if not match:
         raise RuntimeError(f"benchmark_judge_invalid: {judged[:200]}")
     return match.group(0)
+
+
+def normalize_mapping_value(value: str) -> str:
+    value = re.sub(r"^[\s:：=,，;；\-–—>→]+", "", value or "")
+    value = value.strip()
+    value = value.strip(" \t\r\n\"'`“”‘’[]【】{}<>《》:：,，;；。.!！?？-–—")
+    value = re.sub(r"[（）()]", "", value)
+    return re.sub(r"\s+", "", value)
+
+
+def extract_anonymized_mappings(text: str) -> dict[str, str]:
+    mappings: dict[str, str] = {}
+    for line in (text or "").splitlines():
+        matches = list(ANON_ID_RE.finditer(line))
+        if not matches:
+            continue
+        for pos, match in enumerate(matches):
+            key = match.group(1)
+            start = match.end()
+            end = matches[pos + 1].start() if pos + 1 < len(matches) else len(line)
+            segment = line[start:end]
+            segment = MAPPING_SEP_RE.sub("", segment)
+            segment = re.split(r"(?:[;；]|,|，|、)\s*(?:\[?[A-Z][A-Z0-9_]*#[0-9]+\]?\s*(?:[:：=]|[-–—]+|->|=>|→))", segment, 1)[0]
+            value = normalize_mapping_value(segment)
+            if value:
+                mappings.setdefault(key, value)
+    return mappings
+
+
+def mapping_match(expected: str, predicted: str) -> tuple[bool, str]:
+    if not expected or not predicted:
+        return False, "missing"
+    if expected == predicted:
+        return True, "exact"
+    if expected in predicted or predicted in expected:
+        return True, "contains"
+    return False, "mismatch"
+
+
+def score_anonymized_mappings(gold: str, predicted: str) -> dict[str, Any]:
+    expected = extract_anonymized_mappings(gold)
+    actual = extract_anonymized_mappings(predicted)
+    matched_exact = 0
+    matched_relaxed = 0
+    by_key: dict[str, dict[str, Any]] = {}
+    for key, expected_value in sorted(expected.items()):
+        predicted_value = actual.get(key, "")
+        matched, match_type = mapping_match(expected_value, predicted_value)
+        if expected_value and predicted_value and expected_value == predicted_value:
+            matched_exact += 1
+        if matched:
+            matched_relaxed += 1
+        by_key[key] = {
+            "expected": expected_value,
+            "predicted": predicted_value,
+            "matched": matched,
+            "match_type": match_type,
+        }
+    missing_keys = [key for key in sorted(expected) if key not in actual]
+    extra_keys = [key for key in sorted(actual) if key not in expected]
+    expected_count = len(expected)
+    predicted_count = len(actual)
+    precision = matched_relaxed / predicted_count if predicted_count else (1.0 if expected_count == 0 else 0.0)
+    recall = matched_relaxed / expected_count if expected_count else 1.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    exact_recall = matched_exact / expected_count if expected_count else 1.0
+    return {
+        "schema_version": "anonymized-mapping-score/v1",
+        "applicable": expected_count > 0,
+        "expected_count": expected_count,
+        "predicted_count": predicted_count,
+        "matched_count": matched_relaxed,
+        "exact_matched_count": matched_exact,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "exact_recall": exact_recall,
+        "missing_keys": missing_keys,
+        "extra_keys": extra_keys,
+        "by_key": by_key,
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -418,6 +501,7 @@ def run_one_item(
         "predicted_answer": predicted,
         "judge": judge,
         "correct": correct,
+        "mapping_score": score_anonymized_mappings(gold, predicted),
         "latency_ms": int((time.time() - item_start) * 1000),
         "error": error,
         "context_chunk_ids": [chunk["id"] for chunk in contexts],
@@ -572,6 +656,14 @@ def main() -> int:
     duration_ms = int((time.time() - started) * 1000)
     question_count = len(selected)
     items = [items_by_index[i] for i in sorted(items_by_index)]
+    mapping_items = [item.get("mapping_score") or {} for item in items if (item.get("mapping_score") or {}).get("applicable")]
+    mapping_expected_count = sum(int(score.get("expected_count") or 0) for score in mapping_items)
+    mapping_predicted_count = sum(int(score.get("predicted_count") or 0) for score in mapping_items)
+    mapping_matched_count = sum(int(score.get("matched_count") or 0) for score in mapping_items)
+    mapping_exact_count = sum(int(score.get("exact_matched_count") or 0) for score in mapping_items)
+    mapping_precision = mapping_matched_count / mapping_predicted_count if mapping_predicted_count else (1.0 if mapping_expected_count == 0 else 0.0)
+    mapping_recall = mapping_matched_count / mapping_expected_count if mapping_expected_count else 1.0
+    mapping_f1 = (2 * mapping_precision * mapping_recall / (mapping_precision + mapping_recall)) if (mapping_precision + mapping_recall) else 0.0
     result = {
         "schema_version": SCHEMA_VERSION,
         "dataset": args.dataset,
@@ -582,6 +674,18 @@ def main() -> int:
         "correct_count": correct_count,
         "failed_count": failed_count,
         "accuracy": (correct_count / question_count) if question_count else 0.0,
+        "anonymized_mapping": {
+            "schema_version": "anonymized-mapping-summary/v1",
+            "applicable_count": len(mapping_items),
+            "expected_count": mapping_expected_count,
+            "predicted_count": mapping_predicted_count,
+            "matched_count": mapping_matched_count,
+            "exact_matched_count": mapping_exact_count,
+            "precision": mapping_precision,
+            "recall": mapping_recall,
+            "f1": mapping_f1,
+            "exact_recall": (mapping_exact_count / mapping_expected_count) if mapping_expected_count else 1.0,
+        },
         "started_at": started_at,
         "finished_at": now_iso(),
         "duration_ms": duration_ms,
