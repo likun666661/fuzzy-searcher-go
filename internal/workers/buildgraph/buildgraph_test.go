@@ -183,6 +183,7 @@ func TestRunMultiRunnerWorkerWritesShardWALAndResumeDoesNotDuplicate(t *testing.
 	graphPath := filepath.Join(dir, "out", "demo_new.json")
 	chunksPath := filepath.Join(dir, "out", "demo.txt")
 	walPath := filepath.Join(dir, "out", "demo.wal.jsonl")
+	limiterPath := filepath.Join(dir, "out", "demo.llm_rate_limit")
 	mustWrite(t, corpusPath, `[
 {"title":"one","text":"Alpha"},
 {"title":"two","text":"Beta"},
@@ -201,6 +202,8 @@ func TestRunMultiRunnerWorkerWritesShardWALAndResumeDoesNotDuplicate(t *testing.
 		Resume:           true,
 		MaxWorkers:       1,
 		RunnerCount:      3,
+		LLMRateLimitRPM:  6000,
+		LLMRateLimitFile: limiterPath,
 		SkipCommunities:  true,
 		ConfigPath:       "config/base_config.yaml",
 		Mode:             "noagent",
@@ -213,8 +216,12 @@ func TestRunMultiRunnerWorkerWritesShardWALAndResumeDoesNotDuplicate(t *testing.
 	if err != nil {
 		t.Fatalf("run multi-runner worker: %v", err)
 	}
-	if result.TotalChunks != 4 || result.SucceededChunks != 4 || result.RunnerCount != 3 || !result.SkipCommunities {
+	if result.TotalChunks != 4 || result.SucceededChunks != 4 || result.RunnerCount != 3 ||
+		result.LLMRateLimitRPM != 6000 || !result.SkipCommunities {
 		t.Fatalf("multi-runner result = %#v", result)
+	}
+	if _, err := os.Stat(limiterPath); err != nil {
+		t.Fatalf("limiter file missing: %v", err)
 	}
 	records := readWALRecords(t, walPath)
 	if got := countWALEvent(records, "chunk_succeeded"); got != 4 {
@@ -229,6 +236,9 @@ func TestRunMultiRunnerWorkerWritesShardWALAndResumeDoesNotDuplicate(t *testing.
 		if !hasRunRecordForRunner(records, runnerIndex) {
 			t.Fatalf("missing run record for runner %v, records = %#v", runnerIndex, records)
 		}
+	}
+	if !hasRunRecordWithRateLimit(records, 6000) {
+		t.Fatalf("missing rate-limit metadata in WAL, records = %#v", records)
 	}
 	if !strings.Contains(string(mustRead(t, chunksPath)), "Alpha") || !strings.Contains(string(mustRead(t, chunksPath)), "Delta") {
 		t.Fatalf("chunks output = %s", mustRead(t, chunksPath))
@@ -453,6 +463,20 @@ func hasRunRecordForRunner(records []map[string]any, runnerIndex float64) bool {
 		}
 		payload, _ := record["payload"].(map[string]any)
 		if payload["runner_index"] == runnerIndex {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRunRecordWithRateLimit(records []map[string]any, rpm float64) bool {
+	for _, record := range records {
+		event, _ := record["event"].(string)
+		if !strings.HasPrefix(event, "run_") {
+			continue
+		}
+		payload, _ := record["payload"].(map[string]any)
+		if payload["llm_rate_limit_rpm"] == rpm {
 			return true
 		}
 	}
