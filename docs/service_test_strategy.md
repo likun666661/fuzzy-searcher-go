@@ -108,6 +108,9 @@ Required coverage:
 - `build_graph` WAL/resume gates cover chunk-level `started`, `succeeded`, and
   `failed` rows, interrupted chunk retry, malformed/stale WAL failure, and final
   compaction before graph/chunks become `written`.
+- Multi-runner graph extraction gates cover lease uniqueness, runner crash,
+  lease expiry, late result rejection, resume without duplicate LLM calls, and
+  final compaction consuming only scheduler-accepted successes.
 
 Gate rule: job APIs should be stable before attaching graph construction,
 golden generation, answer generation, or other long-running workers.

@@ -14,6 +14,10 @@ Phase 28 extends this worker with a chunk-level write-ahead log (WAL) so long
 LLM extraction runs can resume after interruption. The detailed WAL contract is
 defined in `docs/contracts/graph_construction_wal.md`.
 
+Phase 30 adds a process-level multi-runner extraction contract for production
+parallelism. That contract is defined in
+`docs/contracts/graph_extraction_multi_runner.md`.
+
 ## Job Request
 
 ```http
@@ -55,6 +59,11 @@ Recommended fields:
   chunks. Default should be true for service-managed builds.
 - `max_workers`: bounded chunk extraction concurrency. WAL appends remain
   serialized by the worker.
+- `runner_mode`: future selector for `single_process` or `multi_process`.
+- `runner_count`: future number of Python runner processes when
+  `runner_mode=multi_process`.
+- `runner_lease_timeout_seconds`: future per-chunk lease timeout for
+  multi-runner scheduling.
 - `skip_communities`: future optional flag to skip community/level-4 indexing
   during compaction when the smoke target is chunk WAL/resume rather than full
   community graph quality.

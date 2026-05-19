@@ -11,6 +11,10 @@ worker process orchestration. Python still owns chunking, LLM extraction,
 schema-aware parsing, graph compaction, optional community indexing, and cache
 generation.
 
+Phase 30 extends this boundary from a single resumable Python worker into a
+Go-scheduled multi-runner pool. That process-level concurrency contract is
+defined in `docs/contracts/graph_extraction_multi_runner.md`.
+
 ## Goals
 
 - append an operation record before each expensive chunk extraction starts;
@@ -302,6 +306,10 @@ Rules:
 
 The final graph/chunks files are derived artifacts. The WAL is the durable log
 for expensive chunk extraction.
+
+In multi-runner mode, the WAL is also the handoff between runner processes and
+the final compactor. Only scheduler-accepted runner results may become
+`chunk_succeeded` rows.
 
 ## Cancellation
 
