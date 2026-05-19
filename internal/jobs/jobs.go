@@ -118,6 +118,10 @@ type BuildGraphSpec struct {
 	SchemaPath       string `json:"schema_path,omitempty"`
 	GraphOutputPath  string `json:"graph_output_path"`
 	ChunksOutputPath string `json:"chunks_output_path"`
+	WALPath          string `json:"wal_path,omitempty"`
+	Resume           bool   `json:"resume,omitempty"`
+	MaxWorkers       int    `json:"max_workers,omitempty"`
+	SkipCommunities  bool   `json:"skip_communities,omitempty"`
 	CacheDir         string `json:"cache_dir,omitempty"`
 	ConfigPath       string `json:"config_path,omitempty"`
 	Mode             string `json:"mode,omitempty"`

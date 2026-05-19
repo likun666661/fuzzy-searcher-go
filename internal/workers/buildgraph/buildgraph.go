@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/likun666661/youtu-rag-service/internal/jobs"
@@ -31,6 +32,11 @@ type Result struct {
 	Dataset          string `json:"dataset"`
 	GraphOutputPath  string `json:"graph_output_path"`
 	ChunksOutputPath string `json:"chunks_output_path"`
+	WALPath          string `json:"wal_path,omitempty"`
+	TotalChunks      int    `json:"total_chunks,omitempty"`
+	SucceededChunks  int    `json:"succeeded_chunks,omitempty"`
+	SkippedChunks    int    `json:"skipped_chunks,omitempty"`
+	SkipCommunities  bool   `json:"skip_communities,omitempty"`
 	CacheDir         string `json:"cache_dir,omitempty"`
 	Stdout           string `json:"stdout,omitempty"`
 	Stderr           string `json:"stderr,omitempty"`
@@ -80,6 +86,18 @@ func Run(ctx context.Context, cfg Config, spec jobs.BuildGraphSpec) (*Result, er
 	if strings.TrimSpace(spec.CacheDir) != "" {
 		args = append(args, "--cache-dir", spec.CacheDir)
 	}
+	if strings.TrimSpace(spec.WALPath) != "" {
+		args = append(args, "--wal", spec.WALPath)
+	}
+	if spec.Resume {
+		args = append(args, "--resume")
+	}
+	if spec.MaxWorkers > 0 {
+		args = append(args, "--max-workers", strconv.Itoa(spec.MaxWorkers))
+	}
+	if spec.SkipCommunities {
+		args = append(args, "--skip-communities")
+	}
 	if strings.TrimSpace(spec.ConfigPath) != "" {
 		args = append(args, "--config", spec.ConfigPath)
 	}
@@ -113,6 +131,7 @@ func Run(ctx context.Context, cfg Config, spec jobs.BuildGraphSpec) (*Result, er
 	err := cmd.Run()
 	result.Stdout = strings.TrimSpace(stdout.String())
 	result.Stderr = strings.TrimSpace(stderr.String())
+	mergeStructuredResult(result)
 	if err != nil {
 		if result.Stderr != "" {
 			return result, fmt.Errorf("build graph worker failed: %w: %s", err, result.Stderr)
@@ -126,6 +145,49 @@ func Run(ctx context.Context, cfg Config, spec jobs.BuildGraphSpec) (*Result, er
 		return result, err
 	}
 	return result, nil
+}
+
+func mergeStructuredResult(result *Result) {
+	if result.Stdout == "" {
+		return
+	}
+	lines := strings.Split(result.Stdout, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var payload Result
+		if err := json.Unmarshal([]byte(line), &payload); err != nil || payload.SchemaVersion != "build-graph-result/v1" {
+			continue
+		}
+		if payload.Dataset != "" {
+			result.Dataset = payload.Dataset
+		}
+		if payload.GraphOutputPath != "" {
+			result.GraphOutputPath = payload.GraphOutputPath
+		}
+		if payload.ChunksOutputPath != "" {
+			result.ChunksOutputPath = payload.ChunksOutputPath
+		}
+		if payload.WALPath != "" {
+			result.WALPath = payload.WALPath
+		}
+		if payload.TotalChunks > 0 {
+			result.TotalChunks = payload.TotalChunks
+		}
+		if payload.SucceededChunks > 0 {
+			result.SucceededChunks = payload.SucceededChunks
+		}
+		if payload.SkippedChunks > 0 {
+			result.SkippedChunks = payload.SkippedChunks
+		}
+		result.SkipCommunities = payload.SkipCommunities
+		if payload.CacheDir != "" {
+			result.CacheDir = payload.CacheDir
+		}
+		return
+	}
 }
 
 func validateGraphOutput(path string) error {

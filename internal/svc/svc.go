@@ -809,6 +809,12 @@ func (s *Service) buildGraphSpec(input jobs.BuildGraphSpec) jobs.BuildGraphSpec 
 	if spec.ChunksOutputPath == "" {
 		spec.ChunksOutputPath = artifactPaths["chunks"]
 	}
+	if spec.WALPath == "" {
+		spec.WALPath = filepath.Join(s.config.ArtifactRoot, "output", "graph_wal", spec.Dataset+".jsonl")
+	}
+	if !spec.SkipCommunities {
+		spec.SkipCommunities = true
+	}
 	if spec.CacheDir == "" {
 		spec.CacheDir = artifactPaths["cache"]
 	}
@@ -830,6 +836,7 @@ func (s *Service) submitBuildGraphJob(spec jobs.BuildGraphSpec) jobs.Job {
 		recorder.Event("worker_started", "build_graph Python worker started")
 		recorder.Artifact("graph", "running", "")
 		recorder.Artifact("chunks", "running", "")
+		recorder.Artifact("graph_wal", "running", spec.WALPath)
 		result, err := buildgraph.Run(ctx, buildgraph.Config{
 			PythonBin:  spec.PythonBin,
 			ScriptPath: spec.ScriptPath,
@@ -838,6 +845,7 @@ func (s *Service) submitBuildGraphJob(spec jobs.BuildGraphSpec) jobs.Job {
 		if err == nil {
 			recorder.Artifact("graph", "written", result.GraphOutputPath)
 			recorder.Artifact("chunks", "written", result.ChunksOutputPath)
+			recorder.Artifact("graph_wal", "written", spec.WALPath)
 			if result.CacheDir != "" {
 				recorder.Artifact("cache", "written", result.CacheDir)
 			}
@@ -845,9 +853,11 @@ func (s *Service) submitBuildGraphJob(spec jobs.BuildGraphSpec) jobs.Job {
 		} else if errors.Is(err, buildgraph.ErrMissingOutput) {
 			recorder.Artifact("graph", "missing", "")
 			recorder.Artifact("chunks", "missing", "")
+			recorder.Artifact("graph_wal", "failed", spec.WALPath)
 		} else {
 			recorder.Artifact("graph", "failed", "")
 			recorder.Artifact("chunks", "failed", "")
+			recorder.Artifact("graph_wal", "failed", spec.WALPath)
 		}
 		return result, err
 	})
@@ -891,6 +901,16 @@ func buildGraphArtifacts(spec jobs.BuildGraphSpec) []jobs.Artifact {
 			Path:        spec.ChunksOutputPath,
 			Status:      "pending",
 			Description: "Chunk text file written by the build_graph worker.",
+		},
+		{
+			Name:          "graph_wal",
+			Role:          "output",
+			Kind:          "jsonl",
+			SchemaVersion: "graph-build-wal/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.WALPath,
+			Status:        "pending",
+			Description:   "Append-only graph construction WAL for chunk-level resume.",
 		},
 		{
 			Name:        "cache",

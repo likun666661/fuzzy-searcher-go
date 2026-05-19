@@ -1624,14 +1624,29 @@ dataset = sys.argv[sys.argv.index("--dataset") + 1]
 graph = sys.argv[sys.argv.index("--graph-output") + 1]
 chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
 cache = sys.argv[sys.argv.index("--cache-dir") + 1]
+wal = sys.argv[sys.argv.index("--wal") + 1]
+assert "--skip-communities" in sys.argv
 os.makedirs(os.path.dirname(graph), exist_ok=True)
 os.makedirs(os.path.dirname(chunks), exist_ok=True)
 os.makedirs(cache, exist_ok=True)
+os.makedirs(os.path.dirname(wal), exist_ok=True)
 with open(graph, "w", encoding="utf-8") as f:
     json.dump([], f)
 with open(chunks, "w", encoding="utf-8") as f:
     f.write("id: c1\tChunk: hello\n")
-print(json.dumps({"ok": True, "dataset": dataset, "graph": graph, "chunks": chunks}))
+with open(wal, "w", encoding="utf-8") as f:
+    f.write("{}\n")
+print(json.dumps({
+    "schema_version": "build-graph-result/v1",
+    "dataset": dataset,
+    "graph_output_path": graph,
+    "chunks_output_path": chunks,
+    "wal_path": wal,
+    "total_chunks": 1,
+    "succeeded_chunks": 1,
+    "skipped_chunks": 0,
+    "skip_communities": True,
+}))
 `)
 
 	cfg := config.Config{
@@ -1662,6 +1677,7 @@ print(json.dumps({"ok": True, "dataset": dataset, "graph": graph, "chunks": chun
 		`"name":"schema"`,
 		`"name":"graph"`,
 		`"name":"chunks"`,
+		`"name":"graph_wal"`,
 		`"name":"cache"`,
 		`"status":"pending"`,
 	} {
@@ -1680,6 +1696,8 @@ print(json.dumps({"ok": True, "dataset": dataset, "graph": graph, "chunks": chun
 		spec["schema_path"] != schemaPath ||
 		spec["graph_output_path"] != graphPath ||
 		spec["chunks_output_path"] != chunksPath ||
+		spec["wal_path"] == "" ||
+		spec["skip_communities"] != true ||
 		spec["cache_dir"] != cacheDir ||
 		spec["python_bin"] != "python3" ||
 		spec["script_path"] != scriptPath ||
@@ -1698,7 +1716,7 @@ print(json.dumps({"ok": True, "dataset": dataset, "graph": graph, "chunks": chun
 	if !ok || result["schema_version"] != "build-graph-result/v1" {
 		t.Fatalf("job result = %#v", job["result"])
 	}
-	for _, name := range []string{"graph", "chunks", "cache"} {
+	for _, name := range []string{"graph", "chunks", "graph_wal", "cache"} {
 		if !containsArtifactStatus(job, name, "written") {
 			t.Fatalf("job artifact %s not written: %#v", name, job["artifacts"])
 		}

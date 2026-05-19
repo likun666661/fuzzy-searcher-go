@@ -16,6 +16,7 @@ func TestRunExecutesPythonWorker(t *testing.T) {
 	script := filepath.Join(dir, "worker.py")
 	graphPath := filepath.Join(dir, "out", "demo_new.json")
 	chunksPath := filepath.Join(dir, "out", "demo.txt")
+	walPath := filepath.Join(dir, "out", "demo.wal.jsonl")
 	cacheDir := filepath.Join(dir, "cache", "demo")
 	writeExecutable(t, script, `#!/usr/bin/env python3
 import json
@@ -24,14 +25,31 @@ import sys
 graph = sys.argv[sys.argv.index("--graph-output") + 1]
 chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
 cache = sys.argv[sys.argv.index("--cache-dir") + 1]
+wal = sys.argv[sys.argv.index("--wal") + 1]
+assert "--resume" in sys.argv
+assert sys.argv[sys.argv.index("--max-workers") + 1] == "4"
+assert "--skip-communities" in sys.argv
 os.makedirs(os.path.dirname(graph), exist_ok=True)
 os.makedirs(os.path.dirname(chunks), exist_ok=True)
 os.makedirs(cache, exist_ok=True)
+os.makedirs(os.path.dirname(wal), exist_ok=True)
 with open(graph, "w", encoding="utf-8") as f:
     json.dump([], f)
 with open(chunks, "w", encoding="utf-8") as f:
     f.write("id: c1\tChunk: hello\n")
-print(json.dumps({"ok": True, "graph": graph, "chunks": chunks}))
+with open(wal, "w", encoding="utf-8") as f:
+    f.write("{}\n")
+print(json.dumps({
+    "schema_version": "build-graph-result/v1",
+    "dataset": "demo",
+    "graph_output_path": graph,
+    "chunks_output_path": chunks,
+    "wal_path": wal,
+    "total_chunks": 2,
+    "succeeded_chunks": 2,
+    "skipped_chunks": 2,
+    "skip_communities": True,
+}))
 `)
 
 	result, err := buildgraph.Run(context.Background(), buildgraph.Config{
@@ -44,6 +62,10 @@ print(json.dumps({"ok": True, "graph": graph, "chunks": chunks}))
 		SchemaPath:       filepath.Join(dir, "schema.json"),
 		GraphOutputPath:  graphPath,
 		ChunksOutputPath: chunksPath,
+		WALPath:          walPath,
+		Resume:           true,
+		MaxWorkers:       4,
+		SkipCommunities:  true,
 		CacheDir:         cacheDir,
 		ConfigPath:       "config/base_config.yaml",
 		Mode:             "noagent",
@@ -53,6 +75,9 @@ print(json.dumps({"ok": True, "graph": graph, "chunks": chunks}))
 	}
 	if result.SchemaVersion != "build-graph-result/v1" || result.GraphOutputPath != graphPath || result.ChunksOutputPath != chunksPath {
 		t.Fatalf("result = %#v", result)
+	}
+	if result.WALPath != walPath || result.TotalChunks != 2 || result.SucceededChunks != 2 || result.SkippedChunks != 2 || !result.SkipCommunities {
+		t.Fatalf("structured result not merged: %#v", result)
 	}
 	if _, err := os.Stat(graphPath); err != nil {
 		t.Fatalf("graph output missing: %v", err)
