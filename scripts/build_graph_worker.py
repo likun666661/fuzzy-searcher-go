@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runner-count", type=int, default=1)
     parser.add_argument("--runner-index", type=int, default=-1)
     parser.add_argument("--extract-only", action="store_true")
+    parser.add_argument("--llm-rate-limit-rpm", type=int, default=0)
+    parser.add_argument("--llm-rate-limit-file", default="")
     parser.add_argument("--skip-communities", action="store_true")
     parser.add_argument("--config", default="config/base_config.yaml")
     parser.add_argument("--mode", default="noagent")
@@ -187,13 +190,52 @@ def apply_extraction(builder: Any, chunk_id: str, parsed_response: dict[str, Any
             builder.graph.add_edge(u, v, relation=relation)
 
 
+def acquire_rate_limit(path: str, rpm: int) -> None:
+    if not path or rpm <= 0:
+        return
+    interval = 60.0 / float(rpm)
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.with_suffix(target.suffix + ".lock")
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            time.sleep(0.05)
+            continue
+        try:
+            now = time.time()
+            try:
+                with open(target, "r", encoding="utf-8") as f:
+                    last = float((f.read() or "0").strip() or "0")
+            except FileNotFoundError:
+                last = 0.0
+            wait_for = (last + interval) - now
+            if wait_for > 0:
+                time.sleep(wait_for)
+                now = time.time()
+            tmp = target.with_suffix(target.suffix + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(f"{now:.6f}\n")
+            os.replace(tmp, target)
+            return
+        finally:
+            os.close(fd)
+            try:
+                os.unlink(lock_path)
+            except FileNotFoundError:
+                pass
+        time.sleep(0.05)
+
+
 def replay_success(builder: Any, record: dict[str, Any]) -> None:
     builder.all_chunks[record["chunk_id"]] = record.get("chunk_text", "")
     apply_extraction(builder, record["chunk_id"], record.get("extraction") or {})
 
 
-def extract_chunk(builder: Any, item: dict[str, Any]) -> dict[str, Any]:
+def extract_chunk(builder: Any, item: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     prompt = builder._get_construction_prompt(item["chunk_text"])
+    acquire_rate_limit(args.llm_rate_limit_file, args.llm_rate_limit_rpm)
     llm_response = builder.extract_with_llm(prompt)
     parsed_response = builder._validate_and_parse_llm_response(prompt, llm_response)
     if not parsed_response:
@@ -222,6 +264,10 @@ def child_runner_argv(args: argparse.Namespace, runner_index: int, wal_path: str
         "--config", args.config,
         "--mode", args.mode,
     ]
+    if args.llm_rate_limit_rpm > 0:
+        argv.extend(["--llm-rate-limit-rpm", str(args.llm_rate_limit_rpm)])
+    if args.llm_rate_limit_file:
+        argv.extend(["--llm-rate-limit-file", args.llm_rate_limit_file])
     if args.schema:
         argv.extend(["--schema", args.schema])
     if args.cache_dir:
@@ -330,6 +376,8 @@ def main() -> int:
             "mode": args.mode,
             "skip_communities": args.skip_communities,
             "runner_count": max(args.runner_count, 1),
+            "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
+            "llm_rate_limit_file": args.llm_rate_limit_file,
             "runner_index": args.runner_index,
             "extract_only": args.extract_only,
         },
@@ -384,6 +432,7 @@ def main() -> int:
                     "reason": "missing_runner_chunk_results",
                     "pending_chunks": len(pending),
                     "runner_count": max(args.runner_count, 1),
+                    "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
                 },
                 "finished_at": now_iso(),
             }, wal_lock, wal_sequence)
@@ -402,7 +451,7 @@ def main() -> int:
             "payload": {},
         }, wal_lock, wal_sequence)
         try:
-            result = extract_chunk(builder, item)
+            result = extract_chunk(builder, item, args)
             return result, None
         except Exception as exc:
             return None, {
@@ -487,6 +536,7 @@ def main() -> int:
             "skipped_chunks": skipped,
             "skip_communities": args.skip_communities,
             "runner_count": max(args.runner_count, 1),
+            "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
         },
     }, wal_lock, wal_sequence)
     builder.triple_deduplicate()
@@ -516,6 +566,7 @@ def main() -> int:
             "skipped_chunks": skipped,
             "skip_communities": args.skip_communities,
             "runner_count": max(args.runner_count, 1),
+            "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
         },
         "finished_at": now_iso(),
     }
@@ -531,6 +582,7 @@ def main() -> int:
         "succeeded_chunks": succeeded,
         "skipped_chunks": skipped,
         "runner_count": max(args.runner_count, 1),
+        "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
         "skip_communities": args.skip_communities,
         "started_at": started_at,
         "finished_at": now_iso(),

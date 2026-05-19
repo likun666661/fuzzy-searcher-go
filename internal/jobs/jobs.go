@@ -122,6 +122,8 @@ type BuildGraphSpec struct {
 	Resume           bool   `json:"resume,omitempty"`
 	MaxWorkers       int    `json:"max_workers,omitempty"`
 	RunnerCount      int    `json:"runner_count,omitempty"`
+	LLMRateLimitRPM  int    `json:"llm_rate_limit_rpm,omitempty"`
+	LLMRateLimitFile string `json:"llm_rate_limit_file,omitempty"`
 	SkipCommunities  bool   `json:"skip_communities,omitempty"`
 	CacheDir         string `json:"cache_dir,omitempty"`
 	ConfigPath       string `json:"config_path,omitempty"`

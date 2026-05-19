@@ -1871,6 +1871,7 @@ assert "--resume" in sys.argv
 assert "--skip-communities" in sys.argv
 assert sys.argv[sys.argv.index("--max-workers") + 1] == "2"
 assert sys.argv[sys.argv.index("--runner-count") + 1] == "3"
+assert sys.argv[sys.argv.index("--llm-rate-limit-rpm") + 1] == "120"
 with open(wal, "r", encoding="utf-8") as f:
     succeeded = [line for line in f if '"chunk_succeeded"' in line]
 if len(succeeded) != 2:
@@ -1894,6 +1895,7 @@ print(json.dumps({
     "succeeded_chunks": 2,
     "skipped_chunks": 2,
     "runner_count": 3,
+    "llm_rate_limit_rpm": 120,
     "skip_communities": True,
 }))
 `)
@@ -1914,7 +1916,7 @@ print(json.dumps({
 	service := svc.NewService(cfg)
 	routes := service.Routes()
 
-	body := bytes.NewBufferString(`{"type":"build_graph","build_graph":{"dataset":"demo","wal_path":` + quote(walPath) + `,"resume":true,"max_workers":2,"runner_count":3,"skip_communities":true}}`)
+	body := bytes.NewBufferString(`{"type":"build_graph","build_graph":{"dataset":"demo","wal_path":` + quote(walPath) + `,"resume":true,"max_workers":2,"runner_count":3,"llm_rate_limit_rpm":120,"skip_communities":true}}`)
 	create := httptest.NewRecorder()
 	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
 	if create.Code != http.StatusAccepted {
@@ -1926,7 +1928,9 @@ print(json.dumps({
 	}
 	spec, _ := created["spec"].(map[string]any)
 	if spec["wal_path"] != walPath || spec["resume"] != true ||
-		spec["max_workers"].(float64) != 2 || spec["runner_count"].(float64) != 3 || spec["skip_communities"] != true {
+		spec["max_workers"].(float64) != 2 || spec["runner_count"].(float64) != 3 ||
+		spec["llm_rate_limit_rpm"].(float64) != 120 || spec["llm_rate_limit_file"] == "" ||
+		spec["skip_communities"] != true {
 		t.Fatalf("created build_graph spec = %#v", spec)
 	}
 
@@ -1935,6 +1939,7 @@ print(json.dumps({
 	if result["graph_output_path"] != graphPath || result["chunks_output_path"] != chunksPath ||
 		result["wal_path"] != walPath || result["skipped_chunks"].(float64) != 2 ||
 		result["succeeded_chunks"].(float64) != 2 || result["runner_count"].(float64) != 3 ||
+		result["llm_rate_limit_rpm"].(float64) != 120 ||
 		result["skip_communities"] != true {
 		t.Fatalf("build_graph result = %#v", result)
 	}

@@ -37,6 +37,7 @@ type Result struct {
 	SucceededChunks  int    `json:"succeeded_chunks,omitempty"`
 	SkippedChunks    int    `json:"skipped_chunks,omitempty"`
 	RunnerCount      int    `json:"runner_count,omitempty"`
+	LLMRateLimitRPM  int    `json:"llm_rate_limit_rpm,omitempty"`
 	SkipCommunities  bool   `json:"skip_communities,omitempty"`
 	CacheDir         string `json:"cache_dir,omitempty"`
 	Stdout           string `json:"stdout,omitempty"`
@@ -99,6 +100,15 @@ func Run(ctx context.Context, cfg Config, spec jobs.BuildGraphSpec) (*Result, er
 	if spec.RunnerCount > 0 {
 		args = append(args, "--runner-count", strconv.Itoa(spec.RunnerCount))
 	}
+	if spec.LLMRateLimitRPM > 0 {
+		args = append(args, "--llm-rate-limit-rpm", strconv.Itoa(spec.LLMRateLimitRPM))
+	}
+	appendString := func(flag string, value string) {
+		if strings.TrimSpace(value) != "" {
+			args = append(args, flag, value)
+		}
+	}
+	appendString("--llm-rate-limit-file", spec.LLMRateLimitFile)
 	if spec.SkipCommunities {
 		args = append(args, "--skip-communities")
 	}
@@ -188,6 +198,9 @@ func mergeStructuredResult(result *Result) {
 		}
 		if payload.RunnerCount > 0 {
 			result.RunnerCount = payload.RunnerCount
+		}
+		if payload.LLMRateLimitRPM > 0 {
+			result.LLMRateLimitRPM = payload.LLMRateLimitRPM
 		}
 		result.SkipCommunities = payload.SkipCommunities
 		if payload.CacheDir != "" {

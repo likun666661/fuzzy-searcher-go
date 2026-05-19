@@ -31,6 +31,8 @@ wal = sys.argv[sys.argv.index("--wal") + 1]
 assert "--resume" in sys.argv
 assert sys.argv[sys.argv.index("--max-workers") + 1] == "4"
 assert sys.argv[sys.argv.index("--runner-count") + 1] == "3"
+assert sys.argv[sys.argv.index("--llm-rate-limit-rpm") + 1] == "90"
+assert sys.argv[sys.argv.index("--llm-rate-limit-file") + 1].endswith("llm.limit")
 assert "--skip-communities" in sys.argv
 os.makedirs(os.path.dirname(graph), exist_ok=True)
 os.makedirs(os.path.dirname(chunks), exist_ok=True)
@@ -52,6 +54,7 @@ print(json.dumps({
     "succeeded_chunks": 2,
     "skipped_chunks": 2,
     "runner_count": 3,
+    "llm_rate_limit_rpm": 90,
     "skip_communities": True,
 }))
 `)
@@ -70,6 +73,8 @@ print(json.dumps({
 		Resume:           true,
 		MaxWorkers:       4,
 		RunnerCount:      3,
+		LLMRateLimitRPM:  90,
+		LLMRateLimitFile: filepath.Join(dir, "llm.limit"),
 		SkipCommunities:  true,
 		CacheDir:         cacheDir,
 		ConfigPath:       "config/base_config.yaml",
@@ -82,7 +87,7 @@ print(json.dumps({
 		t.Fatalf("result = %#v", result)
 	}
 	if result.WALPath != walPath || result.TotalChunks != 2 || result.SucceededChunks != 2 || result.SkippedChunks != 2 ||
-		result.RunnerCount != 3 || !result.SkipCommunities {
+		result.RunnerCount != 3 || result.LLMRateLimitRPM != 90 || !result.SkipCommunities {
 		t.Fatalf("structured result not merged: %#v", result)
 	}
 	if _, err := os.Stat(graphPath); err != nil {

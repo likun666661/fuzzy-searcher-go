@@ -812,6 +812,9 @@ func (s *Service) buildGraphSpec(input jobs.BuildGraphSpec) jobs.BuildGraphSpec 
 	if spec.WALPath == "" {
 		spec.WALPath = filepath.Join(s.config.ArtifactRoot, "output", "graph_wal", spec.Dataset+".jsonl")
 	}
+	if spec.LLMRateLimitFile == "" {
+		spec.LLMRateLimitFile = filepath.Join(s.config.ArtifactRoot, "output", "graph_wal", spec.Dataset+".llm_rate_limit")
+	}
 	if !spec.SkipCommunities {
 		spec.SkipCommunities = true
 	}
