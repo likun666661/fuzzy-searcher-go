@@ -1848,6 +1848,178 @@ raise SystemExit(8)
 	}
 }
 
+func TestBuildGraphJobWALResumeSkipsCompletedChunks(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	corpusPath := filepath.Join(dir, "data", "demo", "demo_corpus.json")
+	schemaPath := filepath.Join(dir, "schemas", "demo.json")
+	graphPath := filepath.Join(dir, "output", "graphs", "demo_new.json")
+	chunksPath := filepath.Join(dir, "output", "chunks", "demo.txt")
+	walPath := filepath.Join(dir, "output", "graph_wal", "demo.jsonl")
+	mustWrite(t, corpusPath, "[]")
+	mustWrite(t, schemaPath, "{}")
+	mustWrite(t, walPath, `{"schema_version":"graph-build-wal/v1","event":"chunk_succeeded","status":"succeeded","chunk_key":"0:0:abc","chunk_id":"c1","chunk_text":"hello","extraction":{"triples":[]}}`+"\n"+
+		`{"schema_version":"graph-build-wal/v1","event":"chunk_succeeded","status":"succeeded","chunk_key":"0:1:def","chunk_id":"c2","chunk_text":"world","extraction":{"triples":[]}}`+"\n")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import json
+import os
+import sys
+graph = sys.argv[sys.argv.index("--graph-output") + 1]
+chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
+wal = sys.argv[sys.argv.index("--wal") + 1]
+assert "--resume" in sys.argv
+assert "--skip-communities" in sys.argv
+assert sys.argv[sys.argv.index("--max-workers") + 1] == "2"
+with open(wal, "r", encoding="utf-8") as f:
+    succeeded = [line for line in f if '"chunk_succeeded"' in line]
+if len(succeeded) != 2:
+    raise SystemExit("resume did not see completed chunks")
+os.makedirs(os.path.dirname(graph), exist_ok=True)
+os.makedirs(os.path.dirname(chunks), exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    json.dump([{"id": "n1"}], f)
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: c1\tChunk: hello\n")
+    f.write("id: c2\tChunk: world\n")
+with open(wal, "a", encoding="utf-8") as f:
+    f.write(json.dumps({"schema_version":"graph-build-wal-compact/v1","event":"compacted","status":"succeeded"}) + "\n")
+print(json.dumps({
+    "schema_version": "build-graph-result/v1",
+    "dataset": "demo",
+    "graph_output_path": graph,
+    "chunks_output_path": chunks,
+    "wal_path": wal,
+    "total_chunks": 2,
+    "succeeded_chunks": 2,
+    "skipped_chunks": 2,
+    "skip_communities": True,
+}))
+`)
+
+	cfg := config.Config{
+		DefaultDataset:   "demo",
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		PythonBin:        "python3",
+		BuildGraphScript: scriptPath,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	body := bytes.NewBufferString(`{"type":"build_graph","build_graph":{"dataset":"demo","wal_path":` + quote(walPath) + `,"resume":true,"max_workers":2,"skip_communities":true}}`)
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create build_graph status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created build_graph job: %v", err)
+	}
+	spec, _ := created["spec"].(map[string]any)
+	if spec["wal_path"] != walPath || spec["resume"] != true ||
+		spec["max_workers"].(float64) != 2 || spec["skip_communities"] != true {
+		t.Fatalf("created build_graph spec = %#v", spec)
+	}
+
+	job := waitForServiceJob(t, routes, created["id"].(string), "succeeded")
+	result, _ := job["result"].(map[string]any)
+	if result["graph_output_path"] != graphPath || result["chunks_output_path"] != chunksPath ||
+		result["wal_path"] != walPath || result["skipped_chunks"].(float64) != 2 ||
+		result["succeeded_chunks"].(float64) != 2 || result["skip_communities"] != true {
+		t.Fatalf("build_graph result = %#v", result)
+	}
+	if !containsArtifactStatus(job, "graph_wal", "written") ||
+		!containsArtifactStatus(job, "graph", "written") ||
+		!containsArtifactStatus(job, "chunks", "written") {
+		t.Fatalf("build_graph artifacts = %#v", job["artifacts"])
+	}
+	walBody, err := os.ReadFile(walPath)
+	if err != nil {
+		t.Fatalf("read wal: %v", err)
+	}
+	if !strings.Contains(string(walBody), `"graph-build-wal-compact/v1"`) {
+		t.Fatalf("wal missing compact record: %s", walBody)
+	}
+
+	restarted := svc.NewService(cfg)
+	restartedRoutes := restarted.Routes()
+	loaded := httptest.NewRecorder()
+	restartedRoutes.ServeHTTP(loaded, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created["id"].(string), nil))
+	if loaded.Code != http.StatusOK || !strings.Contains(loaded.Body.String(), `"skipped_chunks":2`) ||
+		!strings.Contains(loaded.Body.String(), `"name":"graph_wal"`) ||
+		!strings.Contains(loaded.Body.String(), `"status":"written"`) {
+		t.Fatalf("reloaded build_graph job status = %d, body = %s", loaded.Code, loaded.Body.String())
+	}
+}
+
+func TestBuildGraphJobInvalidWALMarksArtifactsFailed(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	corpusPath := filepath.Join(dir, "data", "demo", "demo_corpus.json")
+	schemaPath := filepath.Join(dir, "schemas", "demo.json")
+	walPath := filepath.Join(dir, "output", "graph_wal", "demo.jsonl")
+	mustWrite(t, corpusPath, "[]")
+	mustWrite(t, schemaPath, "{}")
+	mustWrite(t, walPath, "{bad json\n")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import sys
+wal = sys.argv[sys.argv.index("--wal") + 1]
+with open(wal, "r", encoding="utf-8") as f:
+    f.read()
+print("graph_build_wal_invalid: line 1", file=sys.stderr)
+raise SystemExit(2)
+`)
+
+	service := svc.NewService(config.Config{
+		DefaultDataset:   "demo",
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		PythonBin:        "python3",
+		BuildGraphScript: scriptPath,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	})
+	routes := service.Routes()
+
+	body := bytes.NewBufferString(`{"type":"build_graph","build_graph":{"dataset":"demo","wal_path":` + quote(walPath) + `,"resume":true}}`)
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create build_graph status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created build_graph job: %v", err)
+	}
+	job := waitForServiceJob(t, routes, created.ID, "failed")
+	if errorText, _ := job["error"].(string); !strings.Contains(errorText, "graph_build_wal_invalid") {
+		t.Fatalf("job error = %#v", job["error"])
+	}
+	if !containsArtifactStatus(job, "graph_wal", "failed") ||
+		!containsArtifactStatus(job, "graph", "failed") ||
+		!containsArtifactStatus(job, "chunks", "failed") {
+		t.Fatalf("build_graph artifacts = %#v", job["artifacts"])
+	}
+	events := httptest.NewRecorder()
+	routes.ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/v1/jobs/"+created.ID+"/events", nil))
+	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), "graph_build_wal_invalid") {
+		t.Fatalf("build_graph events status = %d, body = %s", events.Code, events.Body.String())
+	}
+}
+
 func TestAnswerJobLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "worker.py")
