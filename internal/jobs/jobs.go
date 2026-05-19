@@ -121,6 +121,7 @@ type BuildGraphSpec struct {
 	WALPath          string `json:"wal_path,omitempty"`
 	Resume           bool   `json:"resume,omitempty"`
 	MaxWorkers       int    `json:"max_workers,omitempty"`
+	RunnerCount      int    `json:"runner_count,omitempty"`
 	SkipCommunities  bool   `json:"skip_communities,omitempty"`
 	CacheDir         string `json:"cache_dir,omitempty"`
 	ConfigPath       string `json:"config_path,omitempty"`

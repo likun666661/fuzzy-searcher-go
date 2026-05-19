@@ -36,6 +36,7 @@ type Result struct {
 	TotalChunks      int    `json:"total_chunks,omitempty"`
 	SucceededChunks  int    `json:"succeeded_chunks,omitempty"`
 	SkippedChunks    int    `json:"skipped_chunks,omitempty"`
+	RunnerCount      int    `json:"runner_count,omitempty"`
 	SkipCommunities  bool   `json:"skip_communities,omitempty"`
 	CacheDir         string `json:"cache_dir,omitempty"`
 	Stdout           string `json:"stdout,omitempty"`
@@ -94,6 +95,9 @@ func Run(ctx context.Context, cfg Config, spec jobs.BuildGraphSpec) (*Result, er
 	}
 	if spec.MaxWorkers > 0 {
 		args = append(args, "--max-workers", strconv.Itoa(spec.MaxWorkers))
+	}
+	if spec.RunnerCount > 0 {
+		args = append(args, "--runner-count", strconv.Itoa(spec.RunnerCount))
 	}
 	if spec.SkipCommunities {
 		args = append(args, "--skip-communities")
@@ -181,6 +185,9 @@ func mergeStructuredResult(result *Result) {
 		}
 		if payload.SkippedChunks > 0 {
 			result.SkippedChunks = payload.SkippedChunks
+		}
+		if payload.RunnerCount > 0 {
+			result.RunnerCount = payload.RunnerCount
 		}
 		result.SkipCommunities = payload.SkipCommunities
 		if payload.CacheDir != "" {

@@ -28,6 +28,7 @@ cache = sys.argv[sys.argv.index("--cache-dir") + 1]
 wal = sys.argv[sys.argv.index("--wal") + 1]
 assert "--resume" in sys.argv
 assert sys.argv[sys.argv.index("--max-workers") + 1] == "4"
+assert sys.argv[sys.argv.index("--runner-count") + 1] == "3"
 assert "--skip-communities" in sys.argv
 os.makedirs(os.path.dirname(graph), exist_ok=True)
 os.makedirs(os.path.dirname(chunks), exist_ok=True)
@@ -48,6 +49,7 @@ print(json.dumps({
     "total_chunks": 2,
     "succeeded_chunks": 2,
     "skipped_chunks": 2,
+    "runner_count": 3,
     "skip_communities": True,
 }))
 `)
@@ -65,6 +67,7 @@ print(json.dumps({
 		WALPath:          walPath,
 		Resume:           true,
 		MaxWorkers:       4,
+		RunnerCount:      3,
 		SkipCommunities:  true,
 		CacheDir:         cacheDir,
 		ConfigPath:       "config/base_config.yaml",
@@ -76,7 +79,8 @@ print(json.dumps({
 	if result.SchemaVersion != "build-graph-result/v1" || result.GraphOutputPath != graphPath || result.ChunksOutputPath != chunksPath {
 		t.Fatalf("result = %#v", result)
 	}
-	if result.WALPath != walPath || result.TotalChunks != 2 || result.SucceededChunks != 2 || result.SkippedChunks != 2 || !result.SkipCommunities {
+	if result.WALPath != walPath || result.TotalChunks != 2 || result.SucceededChunks != 2 || result.SkippedChunks != 2 ||
+		result.RunnerCount != 3 || !result.SkipCommunities {
 		t.Fatalf("structured result not merged: %#v", result)
 	}
 	if _, err := os.Stat(graphPath); err != nil {

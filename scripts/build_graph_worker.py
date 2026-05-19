@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -43,6 +44,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wal", default="")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--max-workers", type=int, default=1)
+    parser.add_argument("--runner-count", type=int, default=1)
+    parser.add_argument("--runner-index", type=int, default=-1)
+    parser.add_argument("--extract-only", action="store_true")
     parser.add_argument("--skip-communities", action="store_true")
     parser.add_argument("--config", default="config/base_config.yaml")
     parser.add_argument("--mode", default="noagent")
@@ -68,11 +72,13 @@ def append_wal(path: str, record: dict[str, Any], lock: threading.Lock, seq: dic
             seq["value"] += 1
             record.setdefault("sequence", seq["value"])
             record.setdefault("time", now_iso())
-        with open(target, "a", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        try:
+            os.write(fd, line.encode("utf-8"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def load_wal(path: str) -> tuple[dict[str, dict[str, Any]], int]:
@@ -199,6 +205,59 @@ def extract_chunk(builder: Any, item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def child_runner_argv(args: argparse.Namespace, runner_index: int, wal_path: str) -> list[str]:
+    argv = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--dataset", args.dataset,
+        "--corpus", args.corpus,
+        "--graph-output", args.graph_output,
+        "--chunks-output", args.chunks_output,
+        "--wal", wal_path,
+        "--resume",
+        "--runner-count", str(max(args.runner_count, 1)),
+        "--runner-index", str(runner_index),
+        "--extract-only",
+        "--max-workers", str(max(args.max_workers, 1)),
+        "--config", args.config,
+        "--mode", args.mode,
+    ]
+    if args.schema:
+        argv.extend(["--schema", args.schema])
+    if args.cache_dir:
+        argv.extend(["--cache-dir", args.cache_dir])
+    if args.skip_communities:
+        argv.append("--skip-communities")
+    return argv
+
+
+def run_child_runners(args: argparse.Namespace, wal_path: str) -> list[tuple[int, int, str, str]]:
+    runner_count = max(args.runner_count, 1)
+    failures: list[tuple[int, int, str, str]] = []
+    with ThreadPoolExecutor(max_workers=runner_count) as executor:
+        futures = {
+            executor.submit(
+                subprocess.run,
+                child_runner_argv(args, runner_index, wal_path),
+                cwd=os.getcwd(),
+                text=True,
+                capture_output=True,
+                check=False,
+            ): runner_index
+            for runner_index in range(runner_count)
+        }
+        for future in as_completed(futures):
+            runner_index = futures[future]
+            proc = future.result()
+            if proc.returncode != 0:
+                failures.append((runner_index, proc.returncode, proc.stdout, proc.stderr))
+            for line in (proc.stdout or "").splitlines():
+                line = line.strip()
+                if line.startswith("{"):
+                    print(line, flush=True)
+    return failures
+
+
 def write_chunks(path: str, chunks: dict[str, str]) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -235,6 +294,8 @@ def main() -> int:
             if not chunk.strip():
                 continue
             items.append(chunk_record(args.dataset, doc_index, chunk_index, chunk))
+    for ordinal, item in enumerate(items):
+        item["chunk_ordinal"] = ordinal
 
     succeeded = 0
     skipped = 0
@@ -250,6 +311,10 @@ def main() -> int:
         else:
             pending.append(item)
 
+    if args.runner_index >= 0:
+        runner_count = max(args.runner_count, 1)
+        pending = [item for item in pending if int(item.get("chunk_ordinal", 0)) % runner_count == args.runner_index]
+
     append_wal(wal_path, {
         "schema_version": WAL_SCHEMA_VERSION,
         "run_id": os.getenv("YOUTU_RAG_JOB_ID", ""),
@@ -264,8 +329,66 @@ def main() -> int:
             "max_workers": max(args.max_workers, 1),
             "mode": args.mode,
             "skip_communities": args.skip_communities,
+            "runner_count": max(args.runner_count, 1),
+            "runner_index": args.runner_index,
+            "extract_only": args.extract_only,
         },
     }, wal_lock, wal_sequence)
+
+    if args.runner_count > 1 and args.runner_index < 0 and not args.extract_only:
+        failures = run_child_runners(args, wal_path)
+        if failures:
+            append_wal(wal_path, {
+                "schema_version": WAL_SCHEMA_VERSION,
+                "run_id": os.getenv("YOUTU_RAG_JOB_ID", ""),
+                "dataset": args.dataset,
+                "event": "run_failed",
+                "status": "failed",
+                "payload": {
+                    "runner_count": max(args.runner_count, 1),
+                    "failed_runners": [
+                        {"runner_index": idx, "return_code": code, "stderr": stderr[-2000:]}
+                        for idx, code, _stdout, stderr in failures
+                    ],
+                },
+                "finished_at": now_iso(),
+            }, wal_lock, wal_sequence)
+            for idx, code, _stdout, stderr in failures:
+                print(f"graph_build_runner_failed: runner={idx} exit={code}: {stderr[-1000:]}", file=sys.stderr)
+            return 3
+
+        wal_latest, max_sequence = load_wal(wal_path)
+        wal_sequence["value"] = max_sequence
+        builder = KTBuilder(args.dataset, args.schema, mode=args.mode, config=config)
+        succeeded = 0
+        skipped = 0
+        pending = []
+        for item in items:
+            existing = wal_latest.get(item["chunk_key"])
+            existing_event = str((existing or {}).get("event") or "")
+            existing_status = str((existing or {}).get("status") or "")
+            if existing and (existing_event == "chunk_succeeded" or existing_status == "succeeded"):
+                replay_success(builder, existing)
+                skipped += 1
+                succeeded += 1
+            else:
+                pending.append(item)
+        if pending:
+            append_wal(wal_path, {
+                "schema_version": WAL_SCHEMA_VERSION,
+                "run_id": os.getenv("YOUTU_RAG_JOB_ID", ""),
+                "dataset": args.dataset,
+                "event": "run_failed",
+                "status": "failed",
+                "payload": {
+                    "reason": "missing_runner_chunk_results",
+                    "pending_chunks": len(pending),
+                    "runner_count": max(args.runner_count, 1),
+                },
+                "finished_at": now_iso(),
+            }, wal_lock, wal_sequence)
+            print(f"graph_build_missing_runner_chunks: {len(pending)}", file=sys.stderr)
+            return 3
 
     def run_one(item: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         append_wal(wal_path, {
@@ -334,6 +457,21 @@ def main() -> int:
         print(f"graph_build_failed_chunks: {failed}", file=sys.stderr)
         return 3
 
+    if args.extract_only:
+        result = {
+            "schema_version": "build-graph-runner-result/v1",
+            "dataset": args.dataset,
+            "wal_path": wal_path,
+            "total_chunks": len(items),
+            "runner_count": max(args.runner_count, 1),
+            "runner_index": args.runner_index,
+            "succeeded_chunks": succeeded,
+            "skipped_chunks": skipped,
+            "finished_at": now_iso(),
+        }
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+        return 0
+
     append_wal(wal_path, {
         "schema_version": WAL_SCHEMA_VERSION,
         "run_id": os.getenv("YOUTU_RAG_JOB_ID", ""),
@@ -348,6 +486,7 @@ def main() -> int:
             "succeeded_chunks": succeeded,
             "skipped_chunks": skipped,
             "skip_communities": args.skip_communities,
+            "runner_count": max(args.runner_count, 1),
         },
     }, wal_lock, wal_sequence)
     builder.triple_deduplicate()
@@ -376,6 +515,7 @@ def main() -> int:
             "succeeded_chunks": succeeded,
             "skipped_chunks": skipped,
             "skip_communities": args.skip_communities,
+            "runner_count": max(args.runner_count, 1),
         },
         "finished_at": now_iso(),
     }
@@ -390,6 +530,7 @@ def main() -> int:
         "total_chunks": len(items),
         "succeeded_chunks": succeeded,
         "skipped_chunks": skipped,
+        "runner_count": max(args.runner_count, 1),
         "skip_communities": args.skip_communities,
         "started_at": started_at,
         "finished_at": now_iso(),
