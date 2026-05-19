@@ -10,6 +10,10 @@ The first worker integration is command-based so it can later be replaced with
 a Python sidecar endpoint or queue worker without changing the external
 `service-job/v1` envelope.
 
+Phase 28 extends this worker with a chunk-level write-ahead log (WAL) so long
+LLM extraction runs can resume after interruption. The detailed WAL contract is
+defined in `docs/contracts/graph_construction_wal.md`.
+
 ## Job Request
 
 ```http
@@ -26,7 +30,10 @@ content-type: application/json
     "schema_path": "/abs/path/youtu-graphrag/schemas/demo.json",
     "graph_output_path": "/abs/path/youtu-graphrag/output/graphs/demo_new.json",
     "chunks_output_path": "/abs/path/youtu-graphrag/output/chunks/demo.txt",
-    "cache_dir": "/abs/path/youtu-graphrag/retriever/faiss_cache_new/demo"
+    "cache_dir": "/abs/path/youtu-graphrag/retriever/faiss_cache_new/demo",
+    "wal_path": "/abs/path/youtu-graphrag/output/graph_wal/demo.jsonl",
+    "resume": true,
+    "max_workers": 5
   }
 }
 ```
@@ -42,6 +49,12 @@ Recommended fields:
 
 - `schema_path`: input schema JSON.
 - `cache_dir`: retrieval cache directory prepared or refreshed by the worker.
+- `wal_path`: append-only graph construction WAL JSONL. Defaults under
+  `output/graph_wal/{dataset}.jsonl`.
+- `resume`: reuse terminal `chunk_succeeded` WAL records and retry interrupted
+  chunks. Default should be true for service-managed builds.
+- `max_workers`: bounded chunk extraction concurrency. WAL appends remain
+  serialized by the worker.
 - `config_path`: Python config file.
 - `mode`: Python construction mode such as `agent` or `noagent`.
 - `python_bin`: per-job Python executable override.
@@ -79,7 +92,9 @@ ${python_bin} ${script_path} \
   --dataset "${dataset}" \
   --corpus "${corpus_path}" \
   --graph-output "${graph_output_path}" \
-  --chunks-output "${chunks_output_path}"
+  --chunks-output "${chunks_output_path}" \
+  --wal "${wal_path}" \
+  --resume
 ```
 
 Optional fields append:
@@ -88,6 +103,9 @@ Optional fields append:
 | --- | --- |
 | `schema_path` | `--schema <path>` |
 | `cache_dir` | `--cache-dir <path>` |
+| `wal_path` | `--wal <path>` |
+| `resume=true` | `--resume` |
+| `max_workers` | `--max-workers <n>` |
 | `config_path` | `--config <path>` |
 | `mode` | `--mode <value>` |
 
@@ -107,6 +125,8 @@ NUMEXPR_NUM_THREADS=1
 Successful worker execution requires:
 
 - process exit code `0`;
+- `wal_path` exists, is parseable JSONL, and contains a terminal
+  `run_succeeded` row when WAL is configured;
 - `graph_output_path` exists and is parseable JSON;
 - `chunks_output_path` exists and is a file;
 - stdout/stderr are captured into the inline job result for diagnosis.
@@ -125,6 +145,10 @@ Expected artifacts:
 - `chunks`: output `chunks_txt`, starts `pending`, moves to `written`.
 - `cache`: output `faiss_cache_dir`, starts `pending`; first implementation
   marks it `written` when a cache directory is configured/prepared.
+- `graph_wal`: output `graph_construction_wal_jsonl`,
+  `schema_version=graph-build-wal/v1`, starts `pending`, moves to `running`
+  when the worker starts, and moves to `written` only after a successful or
+  canceled terminal WAL row. See `docs/contracts/graph_construction_wal.md`.
 
 ## Inline Result
 
@@ -137,6 +161,7 @@ Completed jobs return:
   "graph_output_path": "/abs/path/output/graphs/demo_new.json",
   "chunks_output_path": "/abs/path/output/chunks/demo.txt",
   "cache_dir": "/abs/path/retriever/faiss_cache_new/demo",
+  "wal_path": "/abs/path/output/graph_wal/demo.jsonl",
   "stdout": "{\"ok\": true}",
   "stderr": ""
 }
@@ -152,7 +177,14 @@ Stable event names:
 - `queued`
 - `running`
 - `worker_started`
+- `graph_wal_started`
+- `graph_wal_resumed`
+- `graph_chunk_started`
+- `graph_chunk_succeeded`
+- `graph_chunk_failed`
+- `graph_compaction_started`
 - `artifact_graph_written`
+- `graph_wal_failed`
 - `succeeded`
 - `failed`
 - `interrupted`
@@ -165,7 +197,12 @@ Phase 12 acceptance should verify:
 - response envelope is `service-job/v1`.
 - persisted `job.spec` contains resolved worker command and artifact paths.
 - graph/chunks/cache output artifacts start as `pending`.
+- graph WAL artifact starts as `pending`, moves to `running`, and ends as
+  `written` or `failed` according to the WAL terminal state.
 - success marks graph/chunks/cache `written` and survives service restart.
+- resume skips chunks with existing `chunk_succeeded` WAL records.
+- interrupted chunks with `chunk_started` but no terminal row are retried.
+- malformed or stale WAL rows fail with explicit WAL errors.
 - missing graph/chunks output marks the job failed with artifact status
   `missing`.
 - invalid graph JSON fails output validation.

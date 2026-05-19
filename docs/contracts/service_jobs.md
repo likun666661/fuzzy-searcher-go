@@ -296,13 +296,19 @@ worker command fields are persisted with the job:
 - `chunks`: output `chunks_txt`, starts `pending`, moves to `written`.
 - `cache`: output `faiss_cache_dir`, starts `pending`, moves to `written`
   when prepared by the runner.
+- `graph_wal`: output `graph_construction_wal_jsonl`,
+  `schema_version=graph-build-wal/v1`, starts `pending`, moves to `running`
+  while Python extracts chunks, and moves to `written` after the WAL contains a
+  terminal run row. The WAL is append-only durable partial state for expensive
+  chunk extraction.
 
 Completed jobs return a small inline `build-graph-result/v1` result with
 dataset, graph output path, chunks output path, cache dir, and captured
 stdout/stderr. The large graph/chunks artifacts remain on disk.
 
 The detailed Python worker command contract is defined in
-`docs/contracts/build_graph_worker.md`.
+`docs/contracts/build_graph_worker.md`. The Phase 28 resumability contract is
+defined in `docs/contracts/graph_construction_wal.md`.
 
 ## Implemented Job: answer
 

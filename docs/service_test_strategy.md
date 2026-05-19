@@ -105,6 +105,9 @@ Required coverage:
 - Cancel is idempotent and visible.
 - File-backed records survive service restart.
 - Stale running jobs are marked `interrupted` on load.
+- `build_graph` WAL/resume gates cover chunk-level `started`, `succeeded`, and
+  `failed` rows, interrupted chunk retry, malformed/stale WAL failure, and final
+  compaction before graph/chunks become `written`.
 
 Gate rule: job APIs should be stable before attaching graph construction,
 golden generation, answer generation, or other long-running workers.
