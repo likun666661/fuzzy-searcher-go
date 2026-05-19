@@ -55,6 +55,9 @@ Recommended fields:
   chunks. Default should be true for service-managed builds.
 - `max_workers`: bounded chunk extraction concurrency. WAL appends remain
   serialized by the worker.
+- `skip_communities`: future optional flag to skip community/level-4 indexing
+  during compaction when the smoke target is chunk WAL/resume rather than full
+  community graph quality.
 - `config_path`: Python config file.
 - `mode`: Python construction mode such as `agent` or `noagent`.
 - `python_bin`: per-job Python executable override.

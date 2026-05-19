@@ -8,7 +8,8 @@ progress before and after each expensive extraction.
 
 Go still owns the service job envelope, artifact metadata, cancellation, and
 worker process orchestration. Python still owns chunking, LLM extraction,
-schema-aware parsing, graph compaction, and cache generation.
+schema-aware parsing, graph compaction, optional community indexing, and cache
+generation.
 
 ## Goals
 
@@ -58,8 +59,8 @@ Stable fields:
   truth.
 
 Future additive fields may include `max_failures`, `retry_failed`,
-`reset_wal`, or `allow_stale_wal`. They should not be needed for the first WAL
-implementation.
+`reset_wal`, `skip_communities`, or `allow_stale_wal`. They should not be
+needed for the first WAL implementation.
 
 ## WAL Artifact
 
@@ -274,18 +275,30 @@ Resume never rewrites old WAL rows. It only appends new run/chunk rows.
 ## Compaction
 
 Compaction is the only phase that writes final graph/chunks/cache outputs.
+The durable WAL boundary is chunk extraction, not optional post-processing.
+The original Python graph builder may run community indexing through
+`process_level4()`, which can load additional embedding models. That stage is
+useful for full graph quality, but it must not invalidate completed chunk
+extractions.
 
 Rules:
 
 - Use successful chunk payloads from the current reusable WAL state.
 - Deterministically apply the same normalization/deduplication rules used by
   the graph builder.
+- Treat community indexing / level-4 construction as an optional compaction
+  substage. The worker may expose a future `skip_communities` option or run it
+  after the chunk WAL resume path is proven.
 - Write graph/chunks/cache to temporary paths first, then atomically rename
   into `graph_output_path`, `chunks_output_path`, and `cache_dir` when possible.
 - Append `run_compacting` before writing final outputs.
 - Append `run_succeeded` only after output validation passes.
 - If compaction fails, append `run_failed` and leave the WAL for inspection and
   retry.
+- If optional community indexing fails or hangs, the worker may fail compaction
+  with `graph_compaction_failed`, or skip community indexing when explicitly
+  configured. In both cases, existing `chunk_succeeded` rows remain reusable and
+  resume should not call the LLM again for those chunks.
 
 The final graph/chunks files are derived artifacts. The WAL is the durable log
 for expensive chunk extraction.
