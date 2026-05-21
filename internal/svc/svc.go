@@ -815,6 +815,15 @@ func (s *Service) buildGraphSpec(input jobs.BuildGraphSpec) jobs.BuildGraphSpec 
 	if spec.LLMRateLimitFile == "" {
 		spec.LLMRateLimitFile = filepath.Join(s.config.ArtifactRoot, "output", "graph_wal", spec.Dataset+".llm_rate_limit")
 	}
+	if spec.LLMMaxAttempts <= 0 {
+		spec.LLMMaxAttempts = 3
+	}
+	if spec.LLMRetryBaseSec <= 0 {
+		spec.LLMRetryBaseSec = 2
+	}
+	if spec.LLMRetryMaxSec <= 0 {
+		spec.LLMRetryMaxSec = 30
+	}
 	if !spec.SkipCommunities {
 		spec.SkipCommunities = true
 	}

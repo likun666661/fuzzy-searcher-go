@@ -30,6 +30,12 @@ WAL_SCHEMA_VERSION = "graph-build-wal/v1"
 COMPACT_SCHEMA_VERSION = "graph-build-wal-compact/v1"
 
 
+class ChunkExtractionError(RuntimeError):
+    def __init__(self, message: str, attempts: int) -> None:
+        super().__init__(message)
+        self.attempts = attempts
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -50,6 +56,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--extract-only", action="store_true")
     parser.add_argument("--llm-rate-limit-rpm", type=int, default=0)
     parser.add_argument("--llm-rate-limit-file", default="")
+    parser.add_argument("--llm-max-attempts", type=int, default=1)
+    parser.add_argument("--llm-retry-base-seconds", type=float, default=2.0)
+    parser.add_argument("--llm-retry-max-seconds", type=float, default=30.0)
     parser.add_argument("--skip-communities", action="store_true")
     parser.add_argument("--config", default="config/base_config.yaml")
     parser.add_argument("--mode", default="noagent")
@@ -235,16 +244,31 @@ def replay_success(builder: Any, record: dict[str, Any]) -> None:
 
 def extract_chunk(builder: Any, item: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     prompt = builder._get_construction_prompt(item["chunk_text"])
-    acquire_rate_limit(args.llm_rate_limit_file, args.llm_rate_limit_rpm)
-    llm_response = builder.extract_with_llm(prompt)
-    parsed_response = builder._validate_and_parse_llm_response(prompt, llm_response)
-    if not parsed_response:
-        raise RuntimeError("invalid_llm_response")
-    return {
-        **item,
-        "extraction": parsed_response,
-        "token_count": builder.token_cal(prompt + json.dumps(parsed_response, ensure_ascii=False)),
-    }
+    max_attempts = max(int(args.llm_max_attempts or 1), 1)
+    base_delay = max(float(args.llm_retry_base_seconds or 0), 0.0)
+    max_delay = max(float(args.llm_retry_max_seconds or base_delay), base_delay)
+    last_error = "unknown_error"
+    for attempt in range(1, max_attempts + 1):
+        try:
+            acquire_rate_limit(args.llm_rate_limit_file, args.llm_rate_limit_rpm)
+            llm_response = builder.extract_with_llm(prompt)
+            parsed_response = builder._validate_and_parse_llm_response(prompt, llm_response)
+            if not parsed_response:
+                raise RuntimeError("invalid_llm_response")
+            return {
+                **item,
+                "extraction": parsed_response,
+                "attempts": attempt,
+                "token_count": builder.token_cal(prompt + json.dumps(parsed_response, ensure_ascii=False)),
+            }
+        except Exception as exc:
+            last_error = str(exc) or exc.__class__.__name__
+            if attempt >= max_attempts:
+                break
+            delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+            if delay > 0:
+                time.sleep(delay)
+    raise ChunkExtractionError(f"{last_error} (attempts={max_attempts})", max_attempts)
 
 
 def child_runner_argv(args: argparse.Namespace, runner_index: int, wal_path: str) -> list[str]:
@@ -268,6 +292,11 @@ def child_runner_argv(args: argparse.Namespace, runner_index: int, wal_path: str
         argv.extend(["--llm-rate-limit-rpm", str(args.llm_rate_limit_rpm)])
     if args.llm_rate_limit_file:
         argv.extend(["--llm-rate-limit-file", args.llm_rate_limit_file])
+    argv.extend([
+        "--llm-max-attempts", str(max(args.llm_max_attempts, 1)),
+        "--llm-retry-base-seconds", str(max(args.llm_retry_base_seconds, 0.0)),
+        "--llm-retry-max-seconds", str(max(args.llm_retry_max_seconds, 0.0)),
+    ])
     if args.schema:
         argv.extend(["--schema", args.schema])
     if args.cache_dir:
@@ -380,6 +409,9 @@ def main() -> int:
             "llm_rate_limit_file": args.llm_rate_limit_file,
             "runner_index": args.runner_index,
             "extract_only": args.extract_only,
+            "llm_max_attempts": max(args.llm_max_attempts, 1),
+            "llm_retry_base_seconds": max(args.llm_retry_base_seconds, 0.0),
+            "llm_retry_max_seconds": max(args.llm_retry_max_seconds, 0.0),
         },
     }, wal_lock, wal_sequence)
 
@@ -433,6 +465,7 @@ def main() -> int:
                     "pending_chunks": len(pending),
                     "runner_count": max(args.runner_count, 1),
                     "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
+                    "llm_max_attempts": max(args.llm_max_attempts, 1),
                 },
                 "finished_at": now_iso(),
             }, wal_lock, wal_sequence)
@@ -454,6 +487,7 @@ def main() -> int:
             result = extract_chunk(builder, item, args)
             return result, None
         except Exception as exc:
+            attempts = getattr(exc, "attempts", max(args.llm_max_attempts, 1))
             return None, {
                 "schema_version": WAL_SCHEMA_VERSION,
                 **item,
@@ -462,7 +496,7 @@ def main() -> int:
                 "event": "chunk_failed",
                 "status": "failed",
                 "error": str(exc),
-                "payload": {"error": str(exc)},
+                "payload": {"error": str(exc), "attempts": attempts},
                 "finished_at": now_iso(),
             }
 
@@ -489,7 +523,10 @@ def main() -> int:
                 "event": "chunk_succeeded",
                 "status": "succeeded",
                 "finished_at": now_iso(),
-                "payload": {"token_count": result.get("token_count", 0)},
+                "payload": {
+                    "token_count": result.get("token_count", 0),
+                    "attempts": result.get("attempts", 1),
+                },
                 **result,
             }, wal_lock, wal_sequence)
             print(json.dumps({
@@ -537,6 +574,7 @@ def main() -> int:
             "skip_communities": args.skip_communities,
             "runner_count": max(args.runner_count, 1),
             "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
+            "llm_max_attempts": max(args.llm_max_attempts, 1),
         },
     }, wal_lock, wal_sequence)
     builder.triple_deduplicate()
@@ -567,6 +605,7 @@ def main() -> int:
             "skip_communities": args.skip_communities,
             "runner_count": max(args.runner_count, 1),
             "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
+            "llm_max_attempts": max(args.llm_max_attempts, 1),
         },
         "finished_at": now_iso(),
     }
@@ -583,6 +622,7 @@ def main() -> int:
         "skipped_chunks": skipped,
         "runner_count": max(args.runner_count, 1),
         "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
+        "llm_max_attempts": max(args.llm_max_attempts, 1),
         "skip_communities": args.skip_communities,
         "started_at": started_at,
         "finished_at": now_iso(),

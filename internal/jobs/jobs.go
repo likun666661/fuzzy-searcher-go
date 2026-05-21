@@ -124,6 +124,9 @@ type BuildGraphSpec struct {
 	RunnerCount      int    `json:"runner_count,omitempty"`
 	LLMRateLimitRPM  int    `json:"llm_rate_limit_rpm,omitempty"`
 	LLMRateLimitFile string `json:"llm_rate_limit_file,omitempty"`
+	LLMMaxAttempts   int    `json:"llm_max_attempts,omitempty"`
+	LLMRetryBaseSec  int    `json:"llm_retry_base_seconds,omitempty"`
+	LLMRetryMaxSec   int    `json:"llm_retry_max_seconds,omitempty"`
 	SkipCommunities  bool   `json:"skip_communities,omitempty"`
 	CacheDir         string `json:"cache_dir,omitempty"`
 	ConfigPath       string `json:"config_path,omitempty"`

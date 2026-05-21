@@ -1872,6 +1872,9 @@ assert "--skip-communities" in sys.argv
 assert sys.argv[sys.argv.index("--max-workers") + 1] == "2"
 assert sys.argv[sys.argv.index("--runner-count") + 1] == "3"
 assert sys.argv[sys.argv.index("--llm-rate-limit-rpm") + 1] == "120"
+assert sys.argv[sys.argv.index("--llm-max-attempts") + 1] == "3"
+assert sys.argv[sys.argv.index("--llm-retry-base-seconds") + 1] == "2"
+assert sys.argv[sys.argv.index("--llm-retry-max-seconds") + 1] == "30"
 with open(wal, "r", encoding="utf-8") as f:
     succeeded = [line for line in f if '"chunk_succeeded"' in line]
 if len(succeeded) != 2:
@@ -1896,6 +1899,7 @@ print(json.dumps({
     "skipped_chunks": 2,
     "runner_count": 3,
     "llm_rate_limit_rpm": 120,
+    "llm_max_attempts": 3,
     "skip_communities": True,
 }))
 `)
@@ -1930,6 +1934,9 @@ print(json.dumps({
 	if spec["wal_path"] != walPath || spec["resume"] != true ||
 		spec["max_workers"].(float64) != 2 || spec["runner_count"].(float64) != 3 ||
 		spec["llm_rate_limit_rpm"].(float64) != 120 || spec["llm_rate_limit_file"] == "" ||
+		spec["llm_max_attempts"].(float64) != 3 ||
+		spec["llm_retry_base_seconds"].(float64) != 2 ||
+		spec["llm_retry_max_seconds"].(float64) != 30 ||
 		spec["skip_communities"] != true {
 		t.Fatalf("created build_graph spec = %#v", spec)
 	}
@@ -1940,6 +1947,7 @@ print(json.dumps({
 		result["wal_path"] != walPath || result["skipped_chunks"].(float64) != 2 ||
 		result["succeeded_chunks"].(float64) != 2 || result["runner_count"].(float64) != 3 ||
 		result["llm_rate_limit_rpm"].(float64) != 120 ||
+		result["llm_max_attempts"].(float64) != 3 ||
 		result["skip_communities"] != true {
 		t.Fatalf("build_graph result = %#v", result)
 	}

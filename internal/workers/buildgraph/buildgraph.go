@@ -38,6 +38,7 @@ type Result struct {
 	SkippedChunks    int    `json:"skipped_chunks,omitempty"`
 	RunnerCount      int    `json:"runner_count,omitempty"`
 	LLMRateLimitRPM  int    `json:"llm_rate_limit_rpm,omitempty"`
+	LLMMaxAttempts   int    `json:"llm_max_attempts,omitempty"`
 	SkipCommunities  bool   `json:"skip_communities,omitempty"`
 	CacheDir         string `json:"cache_dir,omitempty"`
 	Stdout           string `json:"stdout,omitempty"`
@@ -102,6 +103,15 @@ func Run(ctx context.Context, cfg Config, spec jobs.BuildGraphSpec) (*Result, er
 	}
 	if spec.LLMRateLimitRPM > 0 {
 		args = append(args, "--llm-rate-limit-rpm", strconv.Itoa(spec.LLMRateLimitRPM))
+	}
+	if spec.LLMMaxAttempts > 0 {
+		args = append(args, "--llm-max-attempts", strconv.Itoa(spec.LLMMaxAttempts))
+	}
+	if spec.LLMRetryBaseSec > 0 {
+		args = append(args, "--llm-retry-base-seconds", strconv.Itoa(spec.LLMRetryBaseSec))
+	}
+	if spec.LLMRetryMaxSec > 0 {
+		args = append(args, "--llm-retry-max-seconds", strconv.Itoa(spec.LLMRetryMaxSec))
 	}
 	appendString := func(flag string, value string) {
 		if strings.TrimSpace(value) != "" {
@@ -201,6 +211,9 @@ func mergeStructuredResult(result *Result) {
 		}
 		if payload.LLMRateLimitRPM > 0 {
 			result.LLMRateLimitRPM = payload.LLMRateLimitRPM
+		}
+		if payload.LLMMaxAttempts > 0 {
+			result.LLMMaxAttempts = payload.LLMMaxAttempts
 		}
 		result.SkipCommunities = payload.SkipCommunities
 		if payload.CacheDir != "" {

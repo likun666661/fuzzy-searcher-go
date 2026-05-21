@@ -33,6 +33,9 @@ assert sys.argv[sys.argv.index("--max-workers") + 1] == "4"
 assert sys.argv[sys.argv.index("--runner-count") + 1] == "3"
 assert sys.argv[sys.argv.index("--llm-rate-limit-rpm") + 1] == "90"
 assert sys.argv[sys.argv.index("--llm-rate-limit-file") + 1].endswith("llm.limit")
+assert sys.argv[sys.argv.index("--llm-max-attempts") + 1] == "3"
+assert sys.argv[sys.argv.index("--llm-retry-base-seconds") + 1] == "2"
+assert sys.argv[sys.argv.index("--llm-retry-max-seconds") + 1] == "30"
 assert "--skip-communities" in sys.argv
 os.makedirs(os.path.dirname(graph), exist_ok=True)
 os.makedirs(os.path.dirname(chunks), exist_ok=True)
@@ -55,6 +58,7 @@ print(json.dumps({
     "skipped_chunks": 2,
     "runner_count": 3,
     "llm_rate_limit_rpm": 90,
+    "llm_max_attempts": 3,
     "skip_communities": True,
 }))
 `)
@@ -75,6 +79,9 @@ print(json.dumps({
 		RunnerCount:      3,
 		LLMRateLimitRPM:  90,
 		LLMRateLimitFile: filepath.Join(dir, "llm.limit"),
+		LLMMaxAttempts:   3,
+		LLMRetryBaseSec:  2,
+		LLMRetryMaxSec:   30,
 		SkipCommunities:  true,
 		CacheDir:         cacheDir,
 		ConfigPath:       "config/base_config.yaml",
@@ -87,7 +94,7 @@ print(json.dumps({
 		t.Fatalf("result = %#v", result)
 	}
 	if result.WALPath != walPath || result.TotalChunks != 2 || result.SucceededChunks != 2 || result.SkippedChunks != 2 ||
-		result.RunnerCount != 3 || result.LLMRateLimitRPM != 90 || !result.SkipCommunities {
+		result.RunnerCount != 3 || result.LLMRateLimitRPM != 90 || result.LLMMaxAttempts != 3 || !result.SkipCommunities {
 		t.Fatalf("structured result not merged: %#v", result)
 	}
 	if _, err := os.Stat(graphPath); err != nil {
@@ -261,6 +268,56 @@ func TestRunMultiRunnerWorkerWritesShardWALAndResumeDoesNotDuplicate(t *testing.
 	}
 }
 
+func TestRunWorkerRetriesTransientExtractionFailure(t *testing.T) {
+	dir := t.TempDir()
+	script := realBuildGraphWorkerPath(t)
+	prepareFakeYoutuGraphRAG(t, dir)
+	corpusPath := filepath.Join(dir, "corpus.json")
+	schemaPath := filepath.Join(dir, "schema.json")
+	graphPath := filepath.Join(dir, "out", "demo_new.json")
+	chunksPath := filepath.Join(dir, "out", "demo.txt")
+	walPath := filepath.Join(dir, "out", "demo.wal.jsonl")
+	mustWrite(t, corpusPath, `[
+{"title":"retry","text":"RETRY"},
+{"title":"ok","text":"Alpha"}
+]`)
+	mustWrite(t, schemaPath, `{"Nodes":["entity"],"Relations":["related"],"Attributes":["name"]}`)
+
+	result, err := buildgraph.Run(context.Background(), buildgraph.Config{
+		PythonBin:  pythonPathWrapper(t, dir),
+		ScriptPath: script,
+		WorkingDir: dir,
+	}, jobs.BuildGraphSpec{
+		Dataset:          "demo",
+		CorpusPath:       corpusPath,
+		SchemaPath:       schemaPath,
+		GraphOutputPath:  graphPath,
+		ChunksOutputPath: chunksPath,
+		WALPath:          walPath,
+		Resume:           true,
+		MaxWorkers:       1,
+		LLMMaxAttempts:   3,
+		LLMRetryBaseSec:  1,
+		LLMRetryMaxSec:   1,
+		SkipCommunities:  true,
+		ConfigPath:       "config/base_config.yaml",
+		Mode:             "noagent",
+	})
+	if err != nil {
+		t.Fatalf("run retry worker: %v", err)
+	}
+	if result.SucceededChunks != 2 || result.LLMMaxAttempts != 3 {
+		t.Fatalf("retry result = %#v", result)
+	}
+	records := readWALRecords(t, walPath)
+	if got := countWALEvent(records, "chunk_failed"); got != 0 {
+		t.Fatalf("transient failure should not write chunk_failed, got %d records=%#v", got, records)
+	}
+	if !hasChunkSuccessAttempt(records, 0, 2) {
+		t.Fatalf("retry chunk success attempts not recorded, records=%#v", records)
+	}
+}
+
 func TestRunMultiRunnerWorkerFailureDoesNotCompact(t *testing.T) {
 	dir := t.TempDir()
 	script := realBuildGraphWorkerPath(t)
@@ -361,6 +418,8 @@ class ConfigManager:
 	mustWrite(t, filepath.Join(dir, "models", "constructor", "kt_gen.py"), `
 import threading
 
+_attempts = {}
+
 class FakeGraph:
     def __init__(self):
         self.nodes = {}
@@ -385,6 +444,10 @@ class KTBuilder:
     def _get_construction_prompt(self, chunk_text):
         return chunk_text
     def extract_with_llm(self, prompt):
+        if "RETRY" in prompt:
+            _attempts[prompt] = _attempts.get(prompt, 0) + 1
+            if _attempts[prompt] == 1:
+                raise RuntimeError("transient timeout")
         if "FAIL" in prompt:
             raise RuntimeError("forced chunk failure")
         return prompt
@@ -477,6 +540,19 @@ func hasRunRecordWithRateLimit(records []map[string]any, rpm float64) bool {
 		}
 		payload, _ := record["payload"].(map[string]any)
 		if payload["llm_rate_limit_rpm"] == rpm {
+			return true
+		}
+	}
+	return false
+}
+
+func hasChunkSuccessAttempt(records []map[string]any, ordinal int, attempts float64) bool {
+	for _, record := range records {
+		if record["event"] != "chunk_succeeded" || record["chunk_ordinal"] != float64(ordinal) {
+			continue
+		}
+		payload, _ := record["payload"].(map[string]any)
+		if payload["attempts"] == attempts {
 			return true
 		}
 	}
