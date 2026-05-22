@@ -191,6 +191,8 @@ func TestRunMultiRunnerWorkerWritesShardWALAndResumeDoesNotDuplicate(t *testing.
 	chunksPath := filepath.Join(dir, "out", "demo.txt")
 	walPath := filepath.Join(dir, "out", "demo.wal.jsonl")
 	limiterPath := filepath.Join(dir, "out", "demo.llm_rate_limit")
+	replayLogPath := filepath.Join(dir, "out", "process_triples.log")
+	t.Setenv("YOUTU_RAG_FAKE_PROCESS_TRIPLES_LOG", replayLogPath)
 	mustWrite(t, corpusPath, `[
 {"title":"one","text":"Alpha"},
 {"title":"two","text":"Beta"},
@@ -251,6 +253,9 @@ func TestRunMultiRunnerWorkerWritesShardWALAndResumeDoesNotDuplicate(t *testing.
 		t.Fatalf("chunks output = %s", mustRead(t, chunksPath))
 	}
 
+	if err := os.Remove(replayLogPath); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("remove replay log: %v", err)
+	}
 	again, err := buildgraph.Run(context.Background(), buildgraph.Config{
 		PythonBin:  pythonPathWrapper(t, dir),
 		ScriptPath: script,
@@ -265,6 +270,9 @@ func TestRunMultiRunnerWorkerWritesShardWALAndResumeDoesNotDuplicate(t *testing.
 	resumedRecords := readWALRecords(t, walPath)
 	if got := countWALEvent(resumedRecords, "chunk_succeeded"); got != 4 {
 		t.Fatalf("resume duplicated chunk_succeeded count = %d, records = %#v", got, resumedRecords)
+	}
+	if got := countNonEmptyLines(t, replayLogPath); got != 4 {
+		t.Fatalf("resume should replay successes only during final parent compact, got %d replay calls", got)
 	}
 }
 
@@ -416,6 +424,7 @@ class ConfigManager:
 	mustWrite(t, filepath.Join(dir, "models", "__init__.py"), "")
 	mustWrite(t, filepath.Join(dir, "models", "constructor", "__init__.py"), "")
 	mustWrite(t, filepath.Join(dir, "models", "constructor", "kt_gen.py"), `
+import os
 import threading
 
 _attempts = {}
@@ -456,6 +465,11 @@ class KTBuilder:
     def _process_attributes(self, extracted_attr, chunk_id, entity_types):
         return [], []
     def _process_triples(self, extracted_triples, chunk_id, entity_types):
+        log = os.environ.get("YOUTU_RAG_FAKE_PROCESS_TRIPLES_LOG")
+        if log:
+            os.makedirs(os.path.dirname(log), exist_ok=True)
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(chunk_id + "\n")
         return [(chunk_id, {"kind": "chunk"})], []
     def _process_attributes_agent(self, extracted_attr, chunk_id, entity_types):
         self.graph.add_node(chunk_id, kind="chunk")
@@ -557,6 +571,18 @@ func hasChunkSuccessAttempt(records []map[string]any, ordinal int, attempts floa
 		}
 	}
 	return false
+}
+
+func countNonEmptyLines(t *testing.T, path string) int {
+	t.Helper()
+	body := mustRead(t, path)
+	count := 0
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func mustWrite(t *testing.T, path string, body string) {

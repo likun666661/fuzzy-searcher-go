@@ -372,6 +372,9 @@ def main() -> int:
     for ordinal, item in enumerate(items):
         item["chunk_ordinal"] = ordinal
 
+    will_spawn_child_runners = args.runner_count > 1 and args.runner_index < 0 and not args.extract_only
+    should_replay_existing = not args.extract_only and not will_spawn_child_runners
+
     succeeded = 0
     skipped = 0
     pending: list[dict[str, Any]] = []
@@ -380,7 +383,8 @@ def main() -> int:
         existing_event = str((existing or {}).get("event") or "")
         existing_status = str((existing or {}).get("status") or "")
         if existing and (existing_event == "chunk_succeeded" or existing_status == "succeeded"):
-            replay_success(builder, existing)
+            if should_replay_existing:
+                replay_success(builder, existing)
             skipped += 1
             succeeded += 1
         else:
@@ -415,7 +419,7 @@ def main() -> int:
         },
     }, wal_lock, wal_sequence)
 
-    if args.runner_count > 1 and args.runner_index < 0 and not args.extract_only:
+    if will_spawn_child_runners:
         failures = run_child_runners(args, wal_path)
         if failures:
             append_wal(wal_path, {
