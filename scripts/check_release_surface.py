@@ -84,6 +84,13 @@ SCRIPT_EXPECTATIONS = {
         "/v1/jobs",
         "AnonyRAG benchmark smoke passed",
     ],
+    "scripts/run_paper_benchmark_smoke.sh": [
+        "Usage: scripts/run_paper_benchmark_smoke.sh",
+        "PAPER_BENCHMARK_DATASET",
+        "scripts/paper_benchmark_worker.py",
+        "scripts/check_paper_benchmark_result.py",
+        "paper benchmark smoke passed",
+    ],
     ".env.example": [
         "YOUTU_RAG_PROFILE=demo",
         "YOUTU_RAG_ARTIFACT_ROOT=../youtu-graphrag",
@@ -148,6 +155,12 @@ def main() -> int:
     require(
         "scripts/run_anonyrag_benchmark_smoke.sh" in makefile,
         "benchmark-smoke must call scripts/run_anonyrag_benchmark_smoke.sh",
+        errors,
+    )
+    require("paper-benchmark-smoke:" in makefile, "Makefile missing paper-benchmark-smoke target", errors)
+    require(
+        "scripts/run_paper_benchmark_smoke.sh" in makefile,
+        "paper-benchmark-smoke must call scripts/run_paper_benchmark_smoke.sh",
         errors,
     )
 

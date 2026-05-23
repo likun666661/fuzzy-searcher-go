@@ -98,4 +98,12 @@ fi
   --llm-timeout-seconds "$TIMEOUT" \
   --resume
 
+python3 scripts/check_paper_benchmark_result.py \
+  --result "$OUTPUT" \
+  --checkpoint "$CHECKPOINT" \
+  --progress "$PROGRESS" \
+  --dataset "$DATASET" \
+  --mode "$MODE" \
+  --limit "$LIMIT"
+
 echo "paper benchmark smoke passed: $OUTPUT"

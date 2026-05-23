@@ -122,6 +122,17 @@ def load_chunks(path: str) -> dict[str, str]:
     return chunks
 
 
+def validate_input_paths(args: argparse.Namespace) -> None:
+    for label, path in (
+        ("qa", args.qa),
+        ("graph", args.graph),
+        ("chunks", args.chunks),
+        ("schema", args.schema),
+    ):
+        if not path or not os.path.isfile(path):
+            raise SystemExit(f"paper_benchmark_missing_artifact: {label} {path}")
+
+
 def configure_original_repo(root: str) -> None:
     root_path = Path(root).resolve()
     if str(root_path) not in sys.path:
@@ -569,10 +580,12 @@ def build_result(
 
 def main() -> int:
     args = parse_args()
+    validate_input_paths(args)
+    qa_items = load_qa(args.qa, args.offset, args.limit)
+    chunk_contents = load_chunks(args.chunks)
     configure_original_repo(args.original_root)
     patch_llm_timeout(args.llm_timeout_seconds)
 
-    qa_items = load_qa(args.qa, args.offset, args.limit)
     checkpoint_path = args.checkpoint or str(Path(args.output).with_suffix(".checkpoint.jsonl"))
     progress_path = args.progress or str(Path(args.output).with_suffix(".progress.json"))
     completed = load_checkpoint(checkpoint_path) if args.resume else {}
@@ -658,7 +671,7 @@ def main() -> int:
         mode=args.mode,
         config=config,
     )
-    kt_retriever.chunk2id = load_chunks(args.chunks)
+    kt_retriever.chunk2id = chunk_contents
     kt_retriever.chunk_embedding_cache.clear()
     kt_retriever.chunk_faiss_index = None
     kt_retriever.chunk_id_to_index.clear()
