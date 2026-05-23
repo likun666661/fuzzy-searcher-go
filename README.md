@@ -521,7 +521,9 @@ parity contract is documented in `docs/contracts/path1_candidate_generation.md`.
 The Phase 14 workflow contract is documented in `docs/contracts/workflows.md`.
 Dataset schema management is documented in
 `docs/contracts/schema_management.md`. Dataset benchmark service contracts are
-documented in `docs/contracts/benchmark_worker.md`, with operator guidance in
+documented in `docs/contracts/benchmark_worker.md`; the stricter Phase 33
+paper-aligned GraphQ/KTRetriever/Eval path is documented in
+`docs/contracts/paper_aligned_benchmark.md`, with operator guidance in
 `docs/benchmark_guide.md`.
 
 ## Dataset Benchmarking
@@ -542,6 +544,10 @@ For one-off dataset benchmark experiments, start with
   export LLM_API_KEY="${DEEPSEEK_API_KEY}"
   YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag make benchmark-smoke
   ```
+- For paper-aligned AnonyRAG evaluation, use
+  `docs/contracts/paper_aligned_benchmark.md`: prebuilt graph/chunks, original
+  Python `GraphQ` + `KTRetriever` + `Eval`, `mode=agent` for the main run, and
+  checkpoint/progress around the long loop.
 
 When using DeepSeek for answer/judge experiments, map the existing key into the
 Youtu-RAG environment names instead of writing secrets to disk:

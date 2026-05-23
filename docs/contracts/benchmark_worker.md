@@ -8,6 +8,11 @@ metadata, worker command execution, restart readback, and failure visibility.
 Python continues to own model-heavy benchmark internals: retrieval/answer
 execution, LLM judge prompts, dataset-specific parsing, and model API calls.
 
+Paper-aligned benchmarks are a stricter subtype. They must call the original
+Python GraphQ + KTRetriever + Eval chain rather than the lightweight service
+retrieve or keyword-overlap smoke paths. That contract is defined separately in
+`docs/contracts/paper_aligned_benchmark.md`.
+
 ## Job Request
 
 Submit a benchmark job through `POST /v1/jobs`:
@@ -54,6 +59,8 @@ Stable fields:
   the job failed.
 - `question_timeout_seconds`: optional per-question timeout budget.
 - `mode`: answer mode such as `noagent` or `agent`.
+- `benchmark_kind`: optional benchmark subtype. Use `paper_aligned` only when
+  the worker follows `docs/contracts/paper_aligned_benchmark.md`.
 - `top_k`: retrieval depth.
 - `answer_model`: model used for answer generation.
 - `judge_model`: model used for LLM judging.
@@ -256,6 +263,9 @@ over a pure LLM judge when evaluating AnonyRAG entity restoration quality.
   `/v1/retrieve`; the answer model received the service retrieval output
   (triples/chunks). This is the only mode that should be compared with
   Youtu-GraphRAG-style retrieval benchmarks.
+- `paper_kt_retriever`: each question used the original Python GraphQ +
+  KTRetriever path. This is the expected source for paper-aligned AnonyRAG
+  runs.
 - `corpus_keyword_overlap`: the worker selected chunks directly from the raw
   corpus with a lightweight keyword overlap baseline. This is useful only as a
   service/LLM smoke or weak baseline and must not be reported as GraphRAG

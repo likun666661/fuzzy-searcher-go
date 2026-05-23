@@ -59,6 +59,12 @@ YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag make demo-service-smoke
 适合回答：“Youtu-RAG 在 HotpotQA / 2Wiki / MuSiQue / GraphRAG-Bench /
 AnonyRAG 这种数据集上效果怎么样？”
 
+Phase 33 后，论文式 benchmark 的工程合同单独固化在
+`docs/contracts/paper_aligned_benchmark.md`。它要求复用原 Python
+`GraphQ` + `KTRetriever` + `Eval` 链路，并用外层 runner 增加 checkpoint、
+progress、timeout 和失败预算。它不是 `corpus_keyword_overlap` smoke，也不是只
+调用 Go service `/v1/retrieve` 的轻量 answer/judge。
+
 ### Level 3: Go service 化 benchmark
 
 这是我们还没完全做完的一层。
@@ -73,7 +79,9 @@ AnonyRAG 这种数据集上效果怎么样？”
 6. 对长 benchmark 输出 progress/checkpoint，支持小并发和失败可恢复。
 
 这层从 Phase 26 开始服务化：benchmark job/workflow 的稳定合同在
-`docs/contracts/benchmark_worker.md`。
+`docs/contracts/benchmark_worker.md`。如果目标是严格贴近论文 retrieval /
+answer / eval 链路，还要看 Phase 33 的
+`docs/contracts/paper_aligned_benchmark.md`。
 
 ## 2. 官方可用的数据集线索
 
@@ -374,6 +382,27 @@ YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag make benchmark-smoke
 由 Python worker 写出 `benchmark-result/v1`。这条命令是 smoke，不是论文
 全量跑分；全量 benchmark 需要显式调大 `BENCHMARK_LIMIT` 并关注 token 成本。
 
+### Phase 33: paper-aligned AnonyRAG run
+
+如果要按论文方法测 `anony_chs`，建议固定这些已构好的 artifact：
+
+```text
+QA:     youtu-graphrag/data/anony_chs/final_qa_pairs.json
+graph:  youtu-graphrag/output/graphs/anony_chs_full_flash_new.json
+chunks: youtu-graphrag/output/chunks/anony_chs_full_flash.txt
+schema: youtu-graphrag/schemas/anony_chs.json
+```
+
+这条路径应使用原 repo 的 `GraphQ` decomposition、`KTRetriever`
+retrieval/answer，以及 `utils/eval.py` 的 LLM judge。主方法用 `mode=agent`；
+`mode=noagent` 只能作为 ablation 单独记录。当前 full graph 是工业化 WAL /
+multi-runner 构图产物，并且 `skip_communities=true`，所以结果报告里必须明确
+这点：这是 paper retrieval/answer/eval 口径加 WAL graph artifact，不是原 repo
+community compaction 的逐字复刻。
+
+详细请求、输出、checkpoint 和验收标准见
+`docs/contracts/paper_aligned_benchmark.md`。
+
 Phase 26 的目标合同：
 
 ```json
@@ -435,6 +464,8 @@ spec。
 
 benchmark 结果必须先看 `retrieval.context_source`，否则很容易误读：
 
+- `paper_kt_retriever`：每道题走原 Python `GraphQ` + `KTRetriever` +
+  `Eval` 链路。这是 Phase 33 论文口径 benchmark 应该使用的来源。
 - `service_retrieve`：每道题先调用 Go service 的 `/v1/retrieve`，例如
   `retrieve_mode=native-path1-rerank`，再把返回的 triples/chunks 交给
   answer/judge。这才是可以和 Youtu-GraphRAG 检索链路对齐讨论的路径。

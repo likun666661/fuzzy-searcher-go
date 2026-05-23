@@ -111,6 +111,11 @@ Required coverage:
 - Multi-runner graph extraction gates cover lease uniqueness, runner crash,
   lease expiry, late result rejection, resume without duplicate LLM calls, and
   final compaction consuming only scheduler-accepted successes.
+- Paper-aligned benchmark gates cover the original Python GraphQ + KTRetriever
+  + Eval path, checkpoint/resume, invalid judge output, missing graph/chunks/
+  schema artifacts, and explicit deviation metadata for WAL-built graphs that
+  skip community compaction. This contract is documented in
+  `docs/contracts/paper_aligned_benchmark.md`.
 
 Gate rule: job APIs should be stable before attaching graph construction,
 golden generation, answer generation, or other long-running workers.
