@@ -28,21 +28,24 @@ type Config struct {
 
 // Result is the inline job result for a completed build_graph job.
 type Result struct {
-	SchemaVersion    string `json:"schema_version"`
-	Dataset          string `json:"dataset"`
-	GraphOutputPath  string `json:"graph_output_path"`
-	ChunksOutputPath string `json:"chunks_output_path"`
-	WALPath          string `json:"wal_path,omitempty"`
-	TotalChunks      int    `json:"total_chunks,omitempty"`
-	SucceededChunks  int    `json:"succeeded_chunks,omitempty"`
-	SkippedChunks    int    `json:"skipped_chunks,omitempty"`
-	RunnerCount      int    `json:"runner_count,omitempty"`
-	LLMRateLimitRPM  int    `json:"llm_rate_limit_rpm,omitempty"`
-	LLMMaxAttempts   int    `json:"llm_max_attempts,omitempty"`
-	SkipCommunities  bool   `json:"skip_communities,omitempty"`
-	CacheDir         string `json:"cache_dir,omitempty"`
-	Stdout           string `json:"stdout,omitempty"`
-	Stderr           string `json:"stderr,omitempty"`
+	SchemaVersion     string `json:"schema_version"`
+	Dataset           string `json:"dataset"`
+	GraphOutputPath   string `json:"graph_output_path"`
+	ChunksOutputPath  string `json:"chunks_output_path"`
+	WALPath           string `json:"wal_path,omitempty"`
+	TotalChunks       int    `json:"total_chunks,omitempty"`
+	SucceededChunks   int    `json:"succeeded_chunks,omitempty"`
+	SkippedChunks     int    `json:"skipped_chunks,omitempty"`
+	RunnerCount       int    `json:"runner_count,omitempty"`
+	LLMRateLimitRPM   int    `json:"llm_rate_limit_rpm,omitempty"`
+	LLMMaxAttempts    int    `json:"llm_max_attempts,omitempty"`
+	CompactOnly       bool   `json:"compact_only,omitempty"`
+	EnableCommunities bool   `json:"enable_communities,omitempty"`
+	SkipCommunities   bool   `json:"skip_communities,omitempty"`
+	CompactionWALPath string `json:"compaction_wal_path,omitempty"`
+	CacheDir          string `json:"cache_dir,omitempty"`
+	Stdout            string `json:"stdout,omitempty"`
+	Stderr            string `json:"stderr,omitempty"`
 }
 
 // Run executes the configured Python graph-construction worker.
@@ -119,6 +122,10 @@ func Run(ctx context.Context, cfg Config, spec jobs.BuildGraphSpec) (*Result, er
 		}
 	}
 	appendString("--llm-rate-limit-file", spec.LLMRateLimitFile)
+	if spec.CompactOnly {
+		args = append(args, "--compact-only")
+	}
+	appendString("--compaction-wal", spec.CompactionWALPath)
 	if spec.SkipCommunities {
 		args = append(args, "--skip-communities")
 	}
@@ -215,7 +222,12 @@ func mergeStructuredResult(result *Result) {
 		if payload.LLMMaxAttempts > 0 {
 			result.LLMMaxAttempts = payload.LLMMaxAttempts
 		}
+		result.CompactOnly = payload.CompactOnly
+		result.EnableCommunities = payload.EnableCommunities
 		result.SkipCommunities = payload.SkipCommunities
+		if payload.CompactionWALPath != "" {
+			result.CompactionWALPath = payload.CompactionWALPath
+		}
 		if payload.CacheDir != "" {
 			result.CacheDir = payload.CacheDir
 		}

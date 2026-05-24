@@ -113,27 +113,30 @@ type ParseDocumentsSpec struct {
 
 // BuildGraphSpec is the typed job spec for Python graph construction workers.
 type BuildGraphSpec struct {
-	Dataset          string `json:"dataset"`
-	CorpusPath       string `json:"corpus_path"`
-	SchemaPath       string `json:"schema_path,omitempty"`
-	GraphOutputPath  string `json:"graph_output_path"`
-	ChunksOutputPath string `json:"chunks_output_path"`
-	WALPath          string `json:"wal_path,omitempty"`
-	Resume           bool   `json:"resume,omitempty"`
-	MaxWorkers       int    `json:"max_workers,omitempty"`
-	RunnerCount      int    `json:"runner_count,omitempty"`
-	LLMRateLimitRPM  int    `json:"llm_rate_limit_rpm,omitempty"`
-	LLMRateLimitFile string `json:"llm_rate_limit_file,omitempty"`
-	LLMMaxAttempts   int    `json:"llm_max_attempts,omitempty"`
-	LLMRetryBaseSec  int    `json:"llm_retry_base_seconds,omitempty"`
-	LLMRetryMaxSec   int    `json:"llm_retry_max_seconds,omitempty"`
-	SkipCommunities  bool   `json:"skip_communities,omitempty"`
-	CacheDir         string `json:"cache_dir,omitempty"`
-	ConfigPath       string `json:"config_path,omitempty"`
-	Mode             string `json:"mode,omitempty"`
-	PythonBin        string `json:"python_bin,omitempty"`
-	ScriptPath       string `json:"script_path,omitempty"`
-	WorkingDir       string `json:"working_dir,omitempty"`
+	Dataset           string `json:"dataset"`
+	CorpusPath        string `json:"corpus_path"`
+	SchemaPath        string `json:"schema_path,omitempty"`
+	GraphOutputPath   string `json:"graph_output_path"`
+	ChunksOutputPath  string `json:"chunks_output_path"`
+	WALPath           string `json:"wal_path,omitempty"`
+	Resume            bool   `json:"resume,omitempty"`
+	MaxWorkers        int    `json:"max_workers,omitempty"`
+	RunnerCount       int    `json:"runner_count,omitempty"`
+	LLMRateLimitRPM   int    `json:"llm_rate_limit_rpm,omitempty"`
+	LLMRateLimitFile  string `json:"llm_rate_limit_file,omitempty"`
+	LLMMaxAttempts    int    `json:"llm_max_attempts,omitempty"`
+	LLMRetryBaseSec   int    `json:"llm_retry_base_seconds,omitempty"`
+	LLMRetryMaxSec    int    `json:"llm_retry_max_seconds,omitempty"`
+	CompactOnly       bool   `json:"compact_only,omitempty"`
+	EnableCommunities bool   `json:"enable_communities,omitempty"`
+	SkipCommunities   bool   `json:"skip_communities,omitempty"`
+	CompactionWALPath string `json:"compaction_wal_path,omitempty"`
+	CacheDir          string `json:"cache_dir,omitempty"`
+	ConfigPath        string `json:"config_path,omitempty"`
+	Mode              string `json:"mode,omitempty"`
+	PythonBin         string `json:"python_bin,omitempty"`
+	ScriptPath        string `json:"script_path,omitempty"`
+	WorkingDir        string `json:"working_dir,omitempty"`
 }
 
 // AnswerSpec is the typed job spec for Python answer-generation workers.

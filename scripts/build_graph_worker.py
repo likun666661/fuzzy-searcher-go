@@ -28,6 +28,7 @@ SCHEMA_VERSION = "build-graph-result/v1"
 LEGACY_WAL_SCHEMA_VERSION = "graph-build-wal-item/v1"
 WAL_SCHEMA_VERSION = "graph-build-wal/v1"
 COMPACT_SCHEMA_VERSION = "graph-build-wal-compact/v1"
+COMPACTION_WAL_SCHEMA_VERSION = "graph-compaction-wal/v1"
 
 
 class ChunkExtractionError(RuntimeError):
@@ -59,6 +60,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--llm-max-attempts", type=int, default=1)
     parser.add_argument("--llm-retry-base-seconds", type=float, default=2.0)
     parser.add_argument("--llm-retry-max-seconds", type=float, default=30.0)
+    parser.add_argument("--compact-only", action="store_true")
+    parser.add_argument("--compaction-wal", default="")
     parser.add_argument("--skip-communities", action="store_true")
     parser.add_argument("--config", default="config/base_config.yaml")
     parser.add_argument("--mode", default="noagent")
@@ -91,6 +94,22 @@ def append_wal(path: str, record: dict[str, Any], lock: threading.Lock, seq: dic
             os.fsync(fd)
         finally:
             os.close(fd)
+
+
+def append_compaction_wal(path: str, record: dict[str, Any]) -> None:
+    if not path:
+        return
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    record.setdefault("schema_version", COMPACTION_WAL_SCHEMA_VERSION)
+    record.setdefault("time", now_iso())
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    try:
+        os.write(fd, line.encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def load_wal(path: str) -> tuple[dict[str, dict[str, Any]], int]:
@@ -372,7 +391,12 @@ def main() -> int:
     for ordinal, item in enumerate(items):
         item["chunk_ordinal"] = ordinal
 
-    will_spawn_child_runners = args.runner_count > 1 and args.runner_index < 0 and not args.extract_only
+    will_spawn_child_runners = (
+        args.runner_count > 1
+        and args.runner_index < 0
+        and not args.extract_only
+        and not args.compact_only
+    )
     should_replay_existing = not args.extract_only and not will_spawn_child_runners
 
     succeeded = 0
@@ -413,11 +437,40 @@ def main() -> int:
             "llm_rate_limit_file": args.llm_rate_limit_file,
             "runner_index": args.runner_index,
             "extract_only": args.extract_only,
+            "compact_only": args.compact_only,
+            "compaction_wal_path": args.compaction_wal,
             "llm_max_attempts": max(args.llm_max_attempts, 1),
             "llm_retry_base_seconds": max(args.llm_retry_base_seconds, 0.0),
             "llm_retry_max_seconds": max(args.llm_retry_max_seconds, 0.0),
         },
     }, wal_lock, wal_sequence)
+
+    if args.compact_only and pending:
+        append_wal(wal_path, {
+            "schema_version": WAL_SCHEMA_VERSION,
+            "run_id": os.getenv("YOUTU_RAG_JOB_ID", ""),
+            "dataset": args.dataset,
+            "event": "run_failed",
+            "status": "failed",
+            "payload": {
+                "reason": "graph_compaction_missing_extraction",
+                "pending_chunks": len(pending),
+                "total_chunks": len(items),
+                "succeeded_chunks": succeeded,
+                "skipped_chunks": skipped,
+                "compact_only": True,
+            },
+            "finished_at": now_iso(),
+        }, wal_lock, wal_sequence)
+        append_compaction_wal(args.compaction_wal, {
+            "dataset": args.dataset,
+            "event": "compaction_failed",
+            "status": "failed",
+            "error": "graph_compaction_missing_extraction",
+            "payload": {"pending_chunks": len(pending), "total_chunks": len(items)},
+        })
+        print(f"graph_compaction_missing_extraction: {len(pending)} pending chunks", file=sys.stderr)
+        return 4
 
     if will_spawn_child_runners:
         failures = run_child_runners(args, wal_path)
@@ -576,14 +629,78 @@ def main() -> int:
             "succeeded_chunks": succeeded,
             "skipped_chunks": skipped,
             "skip_communities": args.skip_communities,
+            "compact_only": args.compact_only,
+            "compaction_wal_path": args.compaction_wal,
             "runner_count": max(args.runner_count, 1),
             "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
             "llm_max_attempts": max(args.llm_max_attempts, 1),
         },
     }, wal_lock, wal_sequence)
     builder.triple_deduplicate()
-    if not args.skip_communities:
-        builder.process_level4()
+    community_compaction = "skipped"
+    if args.skip_communities:
+        append_compaction_wal(args.compaction_wal, {
+            "dataset": args.dataset,
+            "event": "compaction_skipped",
+            "status": "skipped",
+            "payload": {
+                "reason": "skip_communities",
+                "compact_only": args.compact_only,
+                "total_chunks": len(items),
+                "succeeded_chunks": succeeded,
+                "skipped_chunks": skipped,
+            },
+        })
+    else:
+        append_compaction_wal(args.compaction_wal, {
+            "dataset": args.dataset,
+            "event": "compaction_started",
+            "status": "started",
+            "payload": {
+                "compact_only": args.compact_only,
+                "total_chunks": len(items),
+                "succeeded_chunks": succeeded,
+                "skipped_chunks": skipped,
+            },
+        })
+        try:
+            builder.process_level4()
+        except Exception as exc:
+            append_wal(wal_path, {
+                "schema_version": WAL_SCHEMA_VERSION,
+                "run_id": os.getenv("YOUTU_RAG_JOB_ID", ""),
+                "dataset": args.dataset,
+                "event": "run_failed",
+                "status": "failed",
+                "payload": {
+                    "reason": "graph_compaction_failed",
+                    "error": str(exc),
+                    "compact_only": args.compact_only,
+                    "compaction_wal_path": args.compaction_wal,
+                },
+                "finished_at": now_iso(),
+            }, wal_lock, wal_sequence)
+            append_compaction_wal(args.compaction_wal, {
+                "dataset": args.dataset,
+                "event": "compaction_failed",
+                "status": "failed",
+                "error": str(exc),
+                "payload": {"compact_only": args.compact_only},
+            })
+            print(f"graph_compaction_failed: {exc}", file=sys.stderr)
+            return 4
+        community_compaction = "completed"
+        append_compaction_wal(args.compaction_wal, {
+            "dataset": args.dataset,
+            "event": "compaction_succeeded",
+            "status": "succeeded",
+            "payload": {
+                "compact_only": args.compact_only,
+                "total_chunks": len(items),
+                "succeeded_chunks": succeeded,
+                "skipped_chunks": skipped,
+            },
+        })
     write_chunks(args.chunks_output, builder.all_chunks)
     graph_output = builder.format_output()
     Path(args.graph_output).parent.mkdir(parents=True, exist_ok=True)
@@ -607,6 +724,9 @@ def main() -> int:
             "succeeded_chunks": succeeded,
             "skipped_chunks": skipped,
             "skip_communities": args.skip_communities,
+            "community_compaction": community_compaction,
+            "compact_only": args.compact_only,
+            "compaction_wal_path": args.compaction_wal,
             "runner_count": max(args.runner_count, 1),
             "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
             "llm_max_attempts": max(args.llm_max_attempts, 1),
@@ -627,7 +747,11 @@ def main() -> int:
         "runner_count": max(args.runner_count, 1),
         "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
         "llm_max_attempts": max(args.llm_max_attempts, 1),
+        "compact_only": args.compact_only,
+        "enable_communities": not args.skip_communities,
         "skip_communities": args.skip_communities,
+        "community_compaction": community_compaction,
+        "compaction_wal_path": args.compaction_wal,
         "started_at": started_at,
         "finished_at": now_iso(),
     }

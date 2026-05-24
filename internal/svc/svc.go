@@ -824,8 +824,16 @@ func (s *Service) buildGraphSpec(input jobs.BuildGraphSpec) jobs.BuildGraphSpec 
 	if spec.LLMRetryMaxSec <= 0 {
 		spec.LLMRetryMaxSec = 30
 	}
-	if !spec.SkipCommunities {
+	if spec.EnableCommunities {
+		spec.SkipCommunities = false
+	} else if !spec.SkipCommunities {
 		spec.SkipCommunities = true
+	}
+	if spec.CompactOnly {
+		spec.Resume = true
+	}
+	if spec.CompactionWALPath == "" {
+		spec.CompactionWALPath = filepath.Join(s.config.ArtifactRoot, "output", "graph_wal", spec.Dataset+".compaction.jsonl")
 	}
 	if spec.CacheDir == "" {
 		spec.CacheDir = artifactPaths["cache"]
@@ -849,6 +857,11 @@ func (s *Service) submitBuildGraphJob(spec jobs.BuildGraphSpec) jobs.Job {
 		recorder.Artifact("graph", "running", "")
 		recorder.Artifact("chunks", "running", "")
 		recorder.Artifact("graph_wal", "running", spec.WALPath)
+		if spec.SkipCommunities {
+			recorder.Artifact("graph_compaction_wal", "skipped", spec.CompactionWALPath)
+		} else {
+			recorder.Artifact("graph_compaction_wal", "running", spec.CompactionWALPath)
+		}
 		result, err := buildgraph.Run(ctx, buildgraph.Config{
 			PythonBin:  spec.PythonBin,
 			ScriptPath: spec.ScriptPath,
@@ -858,6 +871,11 @@ func (s *Service) submitBuildGraphJob(spec jobs.BuildGraphSpec) jobs.Job {
 			recorder.Artifact("graph", "written", result.GraphOutputPath)
 			recorder.Artifact("chunks", "written", result.ChunksOutputPath)
 			recorder.Artifact("graph_wal", "written", spec.WALPath)
+			if spec.SkipCommunities {
+				recorder.Artifact("graph_compaction_wal", "skipped", spec.CompactionWALPath)
+			} else {
+				recorder.Artifact("graph_compaction_wal", "written", spec.CompactionWALPath)
+			}
 			if result.CacheDir != "" {
 				recorder.Artifact("cache", "written", result.CacheDir)
 			}
@@ -866,10 +884,12 @@ func (s *Service) submitBuildGraphJob(spec jobs.BuildGraphSpec) jobs.Job {
 			recorder.Artifact("graph", "missing", "")
 			recorder.Artifact("chunks", "missing", "")
 			recorder.Artifact("graph_wal", "failed", spec.WALPath)
+			recorder.Artifact("graph_compaction_wal", "failed", spec.CompactionWALPath)
 		} else {
 			recorder.Artifact("graph", "failed", "")
 			recorder.Artifact("chunks", "failed", "")
 			recorder.Artifact("graph_wal", "failed", spec.WALPath)
+			recorder.Artifact("graph_compaction_wal", "failed", spec.CompactionWALPath)
 		}
 		return result, err
 	})
@@ -923,6 +943,16 @@ func buildGraphArtifacts(spec jobs.BuildGraphSpec) []jobs.Artifact {
 			Path:          spec.WALPath,
 			Status:        "pending",
 			Description:   "Append-only graph construction WAL for chunk-level resume.",
+		},
+		{
+			Name:          "graph_compaction_wal",
+			Role:          "output",
+			Kind:          "jsonl",
+			SchemaVersion: "graph-compaction-wal/v1",
+			Dataset:       spec.Dataset,
+			Path:          spec.CompactionWALPath,
+			Status:        "pending",
+			Description:   "Append-only graph compaction WAL for replay-only community compaction.",
 		},
 		{
 			Name:        "cache",

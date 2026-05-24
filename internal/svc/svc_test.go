@@ -1975,6 +1975,103 @@ print(json.dumps({
 	}
 }
 
+func TestBuildGraphJobCompactOnlyEnablesCommunityCompaction(t *testing.T) {
+	dir := t.TempDir()
+	scriptPath := filepath.Join(dir, "worker.py")
+	corpusPath := filepath.Join(dir, "data", "demo", "demo_corpus.json")
+	schemaPath := filepath.Join(dir, "schemas", "demo.json")
+	graphPath := filepath.Join(dir, "output", "graphs", "demo_new.json")
+	chunksPath := filepath.Join(dir, "output", "chunks", "demo.txt")
+	walPath := filepath.Join(dir, "output", "graph_wal", "demo.jsonl")
+	compactionWALPath := filepath.Join(dir, "output", "graph_wal", "demo.compaction.jsonl")
+	mustWrite(t, corpusPath, "[]")
+	mustWrite(t, schemaPath, "{}")
+	mustWrite(t, walPath, `{"schema_version":"graph-build-wal/v1","event":"chunk_succeeded","status":"succeeded","chunk_key":"0:0:abc","chunk_id":"c1","chunk_text":"hello","extraction":{"triples":[]}}`+"\n")
+	writeExecutable(t, scriptPath, `#!/usr/bin/env python3
+import json
+import os
+import sys
+graph = sys.argv[sys.argv.index("--graph-output") + 1]
+chunks = sys.argv[sys.argv.index("--chunks-output") + 1]
+wal = sys.argv[sys.argv.index("--wal") + 1]
+compaction_wal = sys.argv[sys.argv.index("--compaction-wal") + 1]
+if "--compact-only" not in sys.argv:
+    raise SystemExit("missing --compact-only")
+if "--resume" not in sys.argv:
+    raise SystemExit("missing --resume")
+if "--skip-communities" in sys.argv:
+    raise SystemExit("should not skip communities")
+os.makedirs(os.path.dirname(graph), exist_ok=True)
+os.makedirs(os.path.dirname(chunks), exist_ok=True)
+os.makedirs(os.path.dirname(compaction_wal), exist_ok=True)
+with open(graph, "w", encoding="utf-8") as f:
+    json.dump([{"id": "community_1", "label": "community"}], f)
+with open(chunks, "w", encoding="utf-8") as f:
+    f.write("id: c1\tChunk: hello\n")
+with open(compaction_wal, "w", encoding="utf-8") as f:
+    f.write(json.dumps({"schema_version":"graph-compaction-wal/v1","event":"compaction_succeeded","status":"succeeded"}) + "\n")
+print(json.dumps({
+    "schema_version": "build-graph-result/v1",
+    "dataset": "demo",
+    "graph_output_path": graph,
+    "chunks_output_path": chunks,
+    "wal_path": wal,
+    "compaction_wal_path": compaction_wal,
+    "compact_only": True,
+    "enable_communities": True,
+    "skip_communities": False,
+    "succeeded_chunks": 1,
+    "skipped_chunks": 1
+}))
+`)
+
+	cfg := config.Config{
+		DefaultDataset:   "demo",
+		CorpusRoot:       filepath.Join(dir, "data"),
+		SchemaRoot:       filepath.Join(dir, "schemas"),
+		GraphRoot:        filepath.Join(dir, "output", "graphs"),
+		ChunksRoot:       filepath.Join(dir, "output", "chunks"),
+		CacheRoot:        filepath.Join(dir, "retriever", "faiss_cache_new"),
+		JobRoot:          filepath.Join(dir, "jobs"),
+		PythonBin:        "python3",
+		BuildGraphScript: scriptPath,
+		WorkerCWD:        dir,
+		DatasetNames:     []string{"demo"},
+	}
+	service := svc.NewService(cfg)
+	routes := service.Routes()
+
+	body := bytes.NewBufferString(`{"type":"build_graph","build_graph":{"dataset":"demo","wal_path":` + quote(walPath) + `,"compaction_wal_path":` + quote(compactionWALPath) + `,"compact_only":true,"enable_communities":true}}`)
+	create := httptest.NewRecorder()
+	routes.ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/v1/jobs", body))
+	if create.Code != http.StatusAccepted {
+		t.Fatalf("create build_graph status = %d, body = %s", create.Code, create.Body.String())
+	}
+	var created map[string]any
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created build_graph job: %v", err)
+	}
+	spec, _ := created["spec"].(map[string]any)
+	if spec["compact_only"] != true || spec["enable_communities"] != true ||
+		spec["skip_communities"] != nil || spec["resume"] != true ||
+		spec["compaction_wal_path"] != compactionWALPath {
+		t.Fatalf("created build_graph compact spec = %#v", spec)
+	}
+	job := waitForServiceJob(t, routes, created["id"].(string), "succeeded")
+	result, _ := job["result"].(map[string]any)
+	if result["compact_only"] != true || result["enable_communities"] != true ||
+		result["skip_communities"] != nil || result["compaction_wal_path"] != compactionWALPath ||
+		result["graph_output_path"] != graphPath || result["chunks_output_path"] != chunksPath {
+		t.Fatalf("compact build_graph result = %#v", result)
+	}
+	if !containsArtifactStatus(job, "graph_compaction_wal", "written") ||
+		!containsArtifactStatus(job, "graph_wal", "written") ||
+		!containsArtifactStatus(job, "graph", "written") ||
+		!containsArtifactStatus(job, "chunks", "written") {
+		t.Fatalf("compact build_graph artifacts = %#v", job["artifacts"])
+	}
+}
+
 func TestBuildGraphJobInvalidWALMarksArtifactsFailed(t *testing.T) {
 	dir := t.TempDir()
 	scriptPath := filepath.Join(dir, "worker.py")

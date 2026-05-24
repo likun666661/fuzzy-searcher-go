@@ -276,6 +276,98 @@ func TestRunMultiRunnerWorkerWritesShardWALAndResumeDoesNotDuplicate(t *testing.
 	}
 }
 
+func TestRunCompactOnlyWorkerReplaysWALAndRunsCommunityCompaction(t *testing.T) {
+	dir := t.TempDir()
+	script := realBuildGraphWorkerPath(t)
+	prepareFakeYoutuGraphRAG(t, dir)
+	corpusPath := filepath.Join(dir, "corpus.json")
+	schemaPath := filepath.Join(dir, "schema.json")
+	graphPath := filepath.Join(dir, "out", "demo_new.json")
+	chunksPath := filepath.Join(dir, "out", "demo.txt")
+	walPath := filepath.Join(dir, "out", "demo.wal.jsonl")
+	compactionWALPath := filepath.Join(dir, "out", "demo.compaction.jsonl")
+	replayLogPath := filepath.Join(dir, "out", "process_triples.log")
+	compactionLogPath := filepath.Join(dir, "out", "process_level4.log")
+	t.Setenv("YOUTU_RAG_FAKE_PROCESS_TRIPLES_LOG", replayLogPath)
+	t.Setenv("YOUTU_RAG_FAKE_PROCESS_LEVEL4_LOG", compactionLogPath)
+	mustWrite(t, corpusPath, `[
+{"title":"one","text":"Alpha"},
+{"title":"two","text":"Beta"}
+]`)
+	mustWrite(t, schemaPath, `{"Nodes":["entity"],"Relations":["related"],"Attributes":["name"]}`)
+
+	base := jobs.BuildGraphSpec{
+		Dataset:          "demo",
+		CorpusPath:       corpusPath,
+		SchemaPath:       schemaPath,
+		GraphOutputPath:  graphPath,
+		ChunksOutputPath: chunksPath,
+		WALPath:          walPath,
+		Resume:           true,
+		MaxWorkers:       1,
+		SkipCommunities:  true,
+		ConfigPath:       "config/base_config.yaml",
+		Mode:             "noagent",
+	}
+	if _, err := buildgraph.Run(context.Background(), buildgraph.Config{
+		PythonBin:  pythonPathWrapper(t, dir),
+		ScriptPath: script,
+		WorkingDir: dir,
+	}, base); err != nil {
+		t.Fatalf("seed extraction wal: %v", err)
+	}
+	records := readWALRecords(t, walPath)
+	if got := countWALEvent(records, "chunk_succeeded"); got != 2 {
+		t.Fatalf("seed chunk_succeeded count = %d, records = %#v", got, records)
+	}
+	if _, err := os.Stat(compactionLogPath); !os.IsNotExist(err) {
+		t.Fatalf("community compaction should not run during seed, stat err=%v", err)
+	}
+
+	result, err := buildgraph.Run(context.Background(), buildgraph.Config{
+		PythonBin:  pythonPathWrapper(t, dir),
+		ScriptPath: script,
+		WorkingDir: dir,
+	}, jobs.BuildGraphSpec{
+		Dataset:           "demo",
+		CorpusPath:        corpusPath,
+		SchemaPath:        schemaPath,
+		GraphOutputPath:   graphPath,
+		ChunksOutputPath:  chunksPath,
+		WALPath:           walPath,
+		Resume:            true,
+		CompactOnly:       true,
+		EnableCommunities: true,
+		SkipCommunities:   false,
+		CompactionWALPath: compactionWALPath,
+		ConfigPath:        "config/base_config.yaml",
+		Mode:              "noagent",
+	})
+	if err != nil {
+		t.Fatalf("compact-only worker: %v", err)
+	}
+	if !result.CompactOnly || !result.EnableCommunities || result.SkipCommunities ||
+		result.CompactionWALPath != compactionWALPath || result.SkippedChunks != 2 ||
+		result.SucceededChunks != 2 {
+		t.Fatalf("compact-only result = %#v", result)
+	}
+	resumedRecords := readWALRecords(t, walPath)
+	if got := countWALEvent(resumedRecords, "chunk_succeeded"); got != 2 {
+		t.Fatalf("compact-only duplicated chunk_succeeded count = %d, records = %#v", got, resumedRecords)
+	}
+	compactionRecords := readWALRecords(t, compactionWALPath)
+	if countWALEvent(compactionRecords, "compaction_started") != 1 ||
+		countWALEvent(compactionRecords, "compaction_succeeded") != 1 {
+		t.Fatalf("compaction WAL records = %#v", compactionRecords)
+	}
+	if got := countNonEmptyLines(t, compactionLogPath); got != 1 {
+		t.Fatalf("process_level4 calls = %d", got)
+	}
+	if !strings.Contains(string(mustRead(t, graphPath)), "community_1") {
+		t.Fatalf("compacted graph output = %s", mustRead(t, graphPath))
+	}
+}
+
 func TestRunWorkerRetriesTransientExtractionFailure(t *testing.T) {
 	dir := t.TempDir()
 	script := realBuildGraphWorkerPath(t)
@@ -482,7 +574,14 @@ class KTBuilder:
     def triple_deduplicate(self):
         pass
     def process_level4(self):
-        raise RuntimeError("process_level4 should be skipped in this test")
+        if os.environ.get("YOUTU_RAG_FAKE_PROCESS_LEVEL4_FAIL"):
+            raise RuntimeError("forced process_level4 failure")
+        log = os.environ.get("YOUTU_RAG_FAKE_PROCESS_LEVEL4_LOG")
+        if log:
+            os.makedirs(os.path.dirname(log), exist_ok=True)
+            with open(log, "a", encoding="utf-8") as f:
+                f.write("process_level4\n")
+        self.graph.add_node("community_1", label="community", level=4, properties={"name": "community", "description": "fake"})
     def format_output(self):
         return [{"id": node_id, **data} for node_id, data in sorted(self.graph.nodes.items())]
 `)
