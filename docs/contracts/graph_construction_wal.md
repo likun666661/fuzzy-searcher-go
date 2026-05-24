@@ -15,6 +15,10 @@ Phase 30 extends this boundary from a single resumable Python worker into a
 Go-scheduled multi-runner pool. That process-level concurrency contract is
 defined in `docs/contracts/graph_extraction_multi_runner.md`.
 
+Phase 34 splits community / level-4 compaction into a replay-only stage with
+its own WAL. That contract is defined in
+`docs/contracts/graph_community_compaction.md`.
+
 ## Goals
 
 - append an operation record before each expensive chunk extraction starts;
@@ -24,6 +28,8 @@ defined in `docs/contracts/graph_extraction_multi_runner.md`.
 - make interrupted `started` chunks safe to retry;
 - compact successful chunk extraction records into final graph/chunks/cache
   artifacts only after the chunk phase is complete;
+- allow community compaction to be retried from the extraction WAL without
+  rerunning chunk LLM extraction;
 - keep WAL files useful for debugging after failure or cancellation.
 
 ## Job Spec Fields
@@ -276,7 +282,7 @@ State rules:
 
 Resume never rewrites old WAL rows. It only appends new run/chunk rows.
 
-## Compaction
+## Base Compaction and Community Compaction
 
 Compaction is the only phase that writes final graph/chunks/cache outputs.
 The durable WAL boundary is chunk extraction, not optional post-processing.
@@ -290,9 +296,9 @@ Rules:
 - Use successful chunk payloads from the current reusable WAL state.
 - Deterministically apply the same normalization/deduplication rules used by
   the graph builder.
-- Treat community indexing / level-4 construction as an optional compaction
-  substage. The worker may expose a future `skip_communities` option or run it
-  after the chunk WAL resume path is proven.
+- Treat community indexing / level-4 construction as a separate compaction
+  substage with its own `graph-compaction-wal/v1` when it is enabled. See
+  `docs/contracts/graph_community_compaction.md`.
 - Write graph/chunks/cache to temporary paths first, then atomically rename
   into `graph_output_path`, `chunks_output_path`, and `cache_dir` when possible.
 - Append `run_compacting` before writing final outputs.
@@ -306,6 +312,10 @@ Rules:
 
 The final graph/chunks files are derived artifacts. The WAL is the durable log
 for expensive chunk extraction.
+
+When community compaction is run later as a replay-only stage, it must consume
+the extraction WAL as input and must not append new `chunk_started`,
+`chunk_succeeded`, or `chunk_failed` rows to that extraction WAL.
 
 In multi-runner mode, the WAL is also the handoff between runner processes and
 the final compactor. Only scheduler-accepted runner results may become

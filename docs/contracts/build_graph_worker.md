@@ -18,6 +18,12 @@ Phase 30 adds a process-level multi-runner extraction contract for production
 parallelism. That contract is defined in
 `docs/contracts/graph_extraction_multi_runner.md`.
 
+Phase 34 adds a replay-only community compaction stage. It consumes an existing
+extraction WAL, writes `graph-compaction-wal/v1`, and publishes
+community-enriched graph/chunks/cache artifacts without rerunning chunk
+extraction. That contract is defined in
+`docs/contracts/graph_community_compaction.md`.
+
 ## Job Request
 
 ```http
@@ -36,8 +42,11 @@ content-type: application/json
     "chunks_output_path": "/abs/path/youtu-graphrag/output/chunks/demo.txt",
     "cache_dir": "/abs/path/youtu-graphrag/retriever/faiss_cache_new/demo",
     "wal_path": "/abs/path/youtu-graphrag/output/graph_wal/demo.jsonl",
+    "compaction_wal_path": "/abs/path/youtu-graphrag/output/graph_wal/demo.compaction.jsonl",
     "resume": true,
-    "max_workers": 5
+    "max_workers": 5,
+    "skip_communities": false,
+    "replay_only": false
   }
 }
 ```
@@ -64,6 +73,10 @@ Recommended fields:
   `runner_mode=multi_process`.
 - `runner_lease_timeout_seconds`: future per-chunk lease timeout for
   multi-runner scheduling.
+- `compaction_wal_path`: append-only community/base compaction WAL JSONL.
+- `replay_only` / `skip_extraction`: run only compaction from `wal_path` and
+  never call chunk extraction.
+- `community_compaction`: explicitly enable level-4/community compaction.
 - `skip_communities`: future optional flag to skip community/level-4 indexing
   during compaction when the smoke target is chunk WAL/resume rather than full
   community graph quality.
@@ -118,6 +131,11 @@ Optional fields append:
 | `wal_path` | `--wal <path>` |
 | `resume=true` | `--resume` |
 | `max_workers` | `--max-workers <n>` |
+| `compaction_wal_path` | `--compaction-wal <path>` |
+| `replay_only=true` | `--replay-only` |
+| `skip_extraction=true` | `--skip-extraction` |
+| `community_compaction=true` | `--community-compaction` |
+| `skip_communities=false` | `--with-communities` |
 | `config_path` | `--config <path>` |
 | `mode` | `--mode <value>` |
 
@@ -161,6 +179,13 @@ Expected artifacts:
   `schema_version=graph-build-wal/v1`, starts `pending`, moves to `running`
   when the worker starts, and moves to `written` only after a successful or
   canceled terminal WAL row. See `docs/contracts/graph_construction_wal.md`.
+- `graph_compaction_wal`: output `graph_compaction_wal_jsonl`,
+  `schema_version=graph-compaction-wal/v1`, present when replay-only or
+  community compaction is enabled. See
+  `docs/contracts/graph_community_compaction.md`.
+- `community_summary`: optional output `graph_community_summary_json`,
+  `schema_version=graph-community-summary/v1`, present when community
+  compaction is enabled.
 
 ## Inline Result
 
@@ -174,6 +199,7 @@ Completed jobs return:
   "chunks_output_path": "/abs/path/output/chunks/demo.txt",
   "cache_dir": "/abs/path/retriever/faiss_cache_new/demo",
   "wal_path": "/abs/path/output/graph_wal/demo.jsonl",
+  "compaction_wal_path": "/abs/path/output/graph_wal/demo.compaction.jsonl",
   "stdout": "{\"ok\": true}",
   "stderr": ""
 }
@@ -195,7 +221,12 @@ Stable event names:
 - `graph_chunk_succeeded`
 - `graph_chunk_failed`
 - `graph_compaction_started`
+- `graph_compaction_resumed`
+- `graph_community_started`
+- `graph_community_succeeded`
+- `graph_community_failed`
 - `artifact_graph_written`
+- `artifact_graph_compaction_wal_written`
 - `graph_wal_failed`
 - `succeeded`
 - `failed`

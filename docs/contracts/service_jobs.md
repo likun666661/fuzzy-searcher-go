@@ -252,7 +252,8 @@ The detailed Python worker command contract is defined in
 `build_graph` turns Python graph construction into a tracked service job. Go
 owns the job envelope, lifecycle events, persistence, worker command execution,
 stdout/stderr capture, and artifact metadata. Python continues to own chunking,
-LLM extraction, schema-aware graph construction, and graph/chunk file writing.
+LLM extraction, schema-aware graph construction, community compaction, cache
+refresh, and graph/chunk file writing.
 
 Submit:
 
@@ -301,6 +302,12 @@ worker command fields are persisted with the job:
   while Python extracts chunks, and moves to `written` after the WAL contains a
   terminal run row. The WAL is append-only durable partial state for expensive
   chunk extraction.
+- `graph_compaction_wal`: optional output `graph_compaction_wal_jsonl`,
+  `schema_version=graph-compaction-wal/v1`, present when a replay-only or
+  community compaction stage is enabled.
+- `community_summary`: optional output `graph_community_summary_json`,
+  `schema_version=graph-community-summary/v1`, present when community
+  compaction is enabled.
 
 Completed jobs return a small inline `build-graph-result/v1` result with
 dataset, graph output path, chunks output path, cache dir, and captured
@@ -308,7 +315,9 @@ stdout/stderr. The large graph/chunks artifacts remain on disk.
 
 The detailed Python worker command contract is defined in
 `docs/contracts/build_graph_worker.md`. The Phase 28 resumability contract is
-defined in `docs/contracts/graph_construction_wal.md`.
+defined in `docs/contracts/graph_construction_wal.md`; the Phase 34 replay-only
+community compaction contract is defined in
+`docs/contracts/graph_community_compaction.md`.
 
 ## Implemented Job: answer
 

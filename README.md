@@ -516,8 +516,13 @@ documented in `docs/contracts/sidecar_primitives.md`. The long-running service
 job contract is documented in `docs/contracts/service_jobs.md`; worker command
 contracts are documented in `docs/contracts/generate_golden_worker.md`,
 `docs/contracts/build_graph_worker.md`, and
-`docs/contracts/answer_worker.md`. The Phase 9 Go-native path1 raw candidate
-parity contract is documented in `docs/contracts/path1_candidate_generation.md`.
+`docs/contracts/answer_worker.md`. Graph extraction WAL, multi-runner
+extraction, and replay-only community compaction are documented in
+`docs/contracts/graph_construction_wal.md`,
+`docs/contracts/graph_extraction_multi_runner.md`, and
+`docs/contracts/graph_community_compaction.md`. The Phase 9 Go-native path1 raw
+candidate parity contract is documented in
+`docs/contracts/path1_candidate_generation.md`.
 The Phase 14 workflow contract is documented in `docs/contracts/workflows.md`.
 Dataset schema management is documented in
 `docs/contracts/schema_management.md`. Dataset benchmark service contracts are

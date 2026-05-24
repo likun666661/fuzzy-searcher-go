@@ -241,6 +241,13 @@ Rules:
 - optional community indexing remains a compaction substage and can be skipped
   without invalidating chunk extraction WAL.
 
+Phase 34 makes the optional community stage explicit. A replay-only community
+compaction worker consumes the accepted extraction WAL, writes its own
+`graph-compaction-wal/v1`, and publishes community-enriched graph/chunks/cache
+artifacts without modifying extraction leases or re-calling chunk LLM prompts.
+That contract is defined in
+`docs/contracts/graph_community_compaction.md`.
+
 ## Failure, Retry, and Cancellation
 
 Stable errors:

@@ -111,6 +111,12 @@ Required coverage:
 - Multi-runner graph extraction gates cover lease uniqueness, runner crash,
   lease expiry, late result rejection, resume without duplicate LLM calls, and
   final compaction consuming only scheduler-accepted successes.
+- Community compaction gates cover replay-only compaction from an existing
+  extraction WAL, a separate `graph-compaction-wal/v1`, no mutation of
+  `chunk_succeeded` extraction rows, community/cache failure retry, and
+  benchmark metadata distinguishing `skip_communities=true` from
+  `skip_communities=false`. This contract is documented in
+  `docs/contracts/graph_community_compaction.md`.
 - Paper-aligned benchmark gates cover the original Python GraphQ + KTRetriever
   + Eval path, checkpoint/resume, invalid judge output, missing graph/chunks/
   schema artifacts, and explicit deviation metadata for WAL-built graphs that

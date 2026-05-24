@@ -25,16 +25,19 @@ The graph and chunks are expected to be prebuilt before the benchmark starts.
 The benchmark runner must not rebuild the graph as part of a paper-aligned
 answer/eval run.
 
-The current full `anony_chs` graph artifact was built by the industrial WAL /
+The initial full `anony_chs` graph artifact was built by the industrial WAL /
 multi-runner graph construction path with `skip_communities=true`. Therefore a
-Phase 33 result should be reported as:
+Phase 33 result over that artifact should be reported as:
 
 ```text
 paper retrieval/answer/eval path + industrial WAL graph artifact
 ```
 
 It should not claim to be a byte-for-byte reproduction of the original
-community-compaction stage when level-4 community embedding was skipped.
+community-compaction stage when level-4 community embedding was skipped. Once
+Phase 34 replay-only community compaction has produced a
+`graph-compaction-wal/v1` and community-enriched graph, the benchmark result
+should set `skip_communities=false` and reference the compaction WAL path.
 
 ## Paper Method Boundary
 
