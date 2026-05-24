@@ -366,6 +366,139 @@ func TestRunCompactOnlyWorkerReplaysWALAndRunsCommunityCompaction(t *testing.T) 
 	if !strings.Contains(string(mustRead(t, graphPath)), "community_1") {
 		t.Fatalf("compacted graph output = %s", mustRead(t, graphPath))
 	}
+
+	t.Setenv("YOUTU_RAG_FAKE_PROCESS_LEVEL4_FAIL", "1")
+	resumed, err := buildgraph.Run(context.Background(), buildgraph.Config{
+		PythonBin:  pythonPathWrapper(t, dir),
+		ScriptPath: script,
+		WorkingDir: dir,
+	}, jobs.BuildGraphSpec{
+		Dataset:           "demo",
+		CorpusPath:        corpusPath,
+		SchemaPath:        schemaPath,
+		GraphOutputPath:   graphPath,
+		ChunksOutputPath:  chunksPath,
+		WALPath:           walPath,
+		Resume:            true,
+		CompactOnly:       true,
+		EnableCommunities: true,
+		SkipCommunities:   false,
+		CompactionWALPath: compactionWALPath,
+		ConfigPath:        "config/base_config.yaml",
+		Mode:              "noagent",
+	})
+	if err != nil {
+		t.Fatalf("resume completed compact-only worker: %v", err)
+	}
+	if !resumed.CompactOnly || !resumed.EnableCommunities || resumed.SkipCommunities ||
+		resumed.SkippedChunks != 2 || resumed.SucceededChunks != 2 {
+		t.Fatalf("resumed compact-only result = %#v", resumed)
+	}
+	resumedRecords = readWALRecords(t, walPath)
+	if got := countWALEvent(resumedRecords, "chunk_succeeded"); got != 2 {
+		t.Fatalf("completed compaction resume duplicated chunk_succeeded count = %d, records = %#v", got, resumedRecords)
+	}
+	compactionRecords = readWALRecords(t, compactionWALPath)
+	if countWALEvent(compactionRecords, "compaction_succeeded") != 1 ||
+		countWALEvent(compactionRecords, "run_resumed") != 1 {
+		t.Fatalf("resumed compaction WAL records = %#v", compactionRecords)
+	}
+	if got := countNonEmptyLines(t, compactionLogPath); got != 1 {
+		t.Fatalf("resume should not rerun process_level4, got %d calls", got)
+	}
+}
+
+func TestRunCompactOnlyWorkerFailsBeforeCommunityOnIncompleteExtractionWAL(t *testing.T) {
+	dir := t.TempDir()
+	script := realBuildGraphWorkerPath(t)
+	prepareFakeYoutuGraphRAG(t, dir)
+	corpusPath := filepath.Join(dir, "corpus.json")
+	schemaPath := filepath.Join(dir, "schema.json")
+	graphPath := filepath.Join(dir, "out", "demo_new.json")
+	chunksPath := filepath.Join(dir, "out", "demo.txt")
+	walPath := filepath.Join(dir, "out", "demo.wal.jsonl")
+	compactionWALPath := filepath.Join(dir, "out", "demo.compaction.jsonl")
+	compactionLogPath := filepath.Join(dir, "out", "process_level4.log")
+	t.Setenv("YOUTU_RAG_FAKE_PROCESS_LEVEL4_LOG", compactionLogPath)
+	mustWrite(t, corpusPath, `[{"title":"one","text":"Alpha"}]`)
+	mustWrite(t, schemaPath, `{"Nodes":["entity"],"Relations":["related"],"Attributes":["name"]}`)
+
+	base := jobs.BuildGraphSpec{
+		Dataset:          "demo",
+		CorpusPath:       corpusPath,
+		SchemaPath:       schemaPath,
+		GraphOutputPath:  graphPath,
+		ChunksOutputPath: chunksPath,
+		WALPath:          walPath,
+		Resume:           true,
+		MaxWorkers:       1,
+		SkipCommunities:  true,
+		ConfigPath:       "config/base_config.yaml",
+		Mode:             "noagent",
+	}
+	if _, err := buildgraph.Run(context.Background(), buildgraph.Config{
+		PythonBin:  pythonPathWrapper(t, dir),
+		ScriptPath: script,
+		WorkingDir: dir,
+	}, base); err != nil {
+		t.Fatalf("seed extraction wal: %v", err)
+	}
+	if got := countWALEvent(readWALRecords(t, walPath), "chunk_succeeded"); got != 1 {
+		t.Fatalf("seed chunk_succeeded count = %d", got)
+	}
+	mustWrite(t, corpusPath, `[
+{"title":"one","text":"Alpha"},
+{"title":"two","text":"Beta"}
+]`)
+	if err := os.Remove(graphPath); err != nil {
+		t.Fatalf("remove graph output: %v", err)
+	}
+	if err := os.Remove(chunksPath); err != nil {
+		t.Fatalf("remove chunks output: %v", err)
+	}
+
+	_, err := buildgraph.Run(context.Background(), buildgraph.Config{
+		PythonBin:  pythonPathWrapper(t, dir),
+		ScriptPath: script,
+		WorkingDir: dir,
+	}, jobs.BuildGraphSpec{
+		Dataset:           "demo",
+		CorpusPath:        corpusPath,
+		SchemaPath:        schemaPath,
+		GraphOutputPath:   graphPath,
+		ChunksOutputPath:  chunksPath,
+		WALPath:           walPath,
+		Resume:            true,
+		CompactOnly:       true,
+		EnableCommunities: true,
+		SkipCommunities:   false,
+		CompactionWALPath: compactionWALPath,
+		ConfigPath:        "config/base_config.yaml",
+		Mode:              "noagent",
+	})
+	if err == nil || !strings.Contains(err.Error(), "graph_compaction_missing_extraction") {
+		t.Fatalf("compact-only incomplete extraction err = %v", err)
+	}
+	records := readWALRecords(t, walPath)
+	if got := countWALEvent(records, "chunk_succeeded"); got != 1 {
+		t.Fatalf("incomplete compact-only duplicated chunk_succeeded count = %d, records = %#v", got, records)
+	}
+	if countWALEvent(records, "run_failed") == 0 {
+		t.Fatalf("incomplete compact-only should append run_failed, records = %#v", records)
+	}
+	compactionRecords := readWALRecords(t, compactionWALPath)
+	if countWALEvent(compactionRecords, "compaction_failed") != 1 {
+		t.Fatalf("incomplete compaction WAL records = %#v", compactionRecords)
+	}
+	if _, err := os.Stat(compactionLogPath); !os.IsNotExist(err) {
+		t.Fatalf("process_level4 should not run for incomplete extraction WAL, stat err=%v", err)
+	}
+	if _, err := os.Stat(graphPath); !os.IsNotExist(err) {
+		t.Fatalf("graph output should not be rewritten after incomplete compact-only failure, stat err=%v", err)
+	}
+	if _, err := os.Stat(chunksPath); !os.IsNotExist(err) {
+		t.Fatalf("chunks output should not be rewritten after incomplete compact-only failure, stat err=%v", err)
+	}
 }
 
 func TestRunWorkerRetriesTransientExtractionFailure(t *testing.T) {

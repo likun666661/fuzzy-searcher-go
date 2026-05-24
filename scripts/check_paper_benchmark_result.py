@@ -40,6 +40,7 @@ def main() -> int:
     parser.add_argument("--dataset", default="")
     parser.add_argument("--mode", choices=["agent", "noagent"], default="")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--community-compaction", choices=["skipped", "completed"], default="skipped")
     parser.add_argument("--allow-private-traces", action="store_true")
     args = parser.parse_args()
 
@@ -77,8 +78,11 @@ def main() -> int:
     require(paper_config.get("enable_reranking") is True, "reranking must be enabled", errors)
 
     deviations = result.get("deviations") or {}
-    require(deviations.get("skip_communities") is True, "skip_communities deviation must be true", errors)
-    require(deviations.get("community_compaction") == "skipped", "community compaction deviation missing", errors)
+    expect_compacted = args.community_compaction == "completed"
+    require(deviations.get("skip_communities") is (not expect_compacted), f"skip_communities deviation must be {not expect_compacted}", errors)
+    require(deviations.get("community_compaction") == args.community_compaction, "community compaction deviation mismatch", errors)
+    if expect_compacted:
+        require(bool(deviations.get("compaction_wal_path")), "compacted benchmark must reference compaction_wal_path", errors)
 
     artifacts = result.get("artifacts") or {}
     for key in ("qa_path", "graph_path", "chunks_path", "schema_path", "checkpoint_path", "progress_path"):

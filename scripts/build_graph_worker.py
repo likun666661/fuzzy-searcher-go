@@ -112,6 +112,28 @@ def append_compaction_wal(path: str, record: dict[str, Any]) -> None:
         os.close(fd)
 
 
+def latest_compaction_terminal_event(path: str) -> str:
+    if not path or not os.path.exists(path):
+        return ""
+    latest = ""
+    with open(path, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"graph_compaction_wal_invalid: line {line_no}: {exc}") from exc
+            schema = record.get("schema_version")
+            if schema != COMPACTION_WAL_SCHEMA_VERSION:
+                raise SystemExit(f"graph_compaction_wal_invalid: line {line_no}: unexpected schema {schema!r}")
+            event = str(record.get("event") or "")
+            if event in {"compaction_succeeded", "compaction_failed"}:
+                latest = event
+    return latest
+
+
 def load_wal(path: str) -> tuple[dict[str, dict[str, Any]], int]:
     if not path or not os.path.exists(path):
         return {}, 0
@@ -471,6 +493,52 @@ def main() -> int:
         })
         print(f"graph_compaction_missing_extraction: {len(pending)} pending chunks", file=sys.stderr)
         return 4
+
+    if (
+        args.compact_only
+        and args.resume
+        and not args.skip_communities
+        and latest_compaction_terminal_event(args.compaction_wal) == "compaction_succeeded"
+        and Path(args.graph_output).is_file()
+        and Path(args.chunks_output).is_file()
+    ):
+        append_compaction_wal(args.compaction_wal, {
+            "dataset": args.dataset,
+            "event": "run_resumed",
+            "status": "succeeded",
+            "payload": {
+                "reason": "existing_compaction_succeeded",
+                "compact_only": True,
+                "total_chunks": len(items),
+                "succeeded_chunks": succeeded,
+                "skipped_chunks": skipped,
+                "graph_output_path": args.graph_output,
+                "chunks_output_path": args.chunks_output,
+            },
+        })
+        result = {
+            "schema_version": SCHEMA_VERSION,
+            "dataset": args.dataset,
+            "graph_output_path": args.graph_output,
+            "chunks_output_path": args.chunks_output,
+            "cache_dir": args.cache_dir,
+            "wal_path": wal_path,
+            "total_chunks": len(items),
+            "succeeded_chunks": succeeded,
+            "skipped_chunks": skipped,
+            "runner_count": max(args.runner_count, 1),
+            "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
+            "llm_max_attempts": max(args.llm_max_attempts, 1),
+            "compact_only": True,
+            "enable_communities": True,
+            "skip_communities": False,
+            "community_compaction": "completed",
+            "compaction_wal_path": args.compaction_wal,
+            "started_at": started_at,
+            "finished_at": now_iso(),
+        }
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+        return 0
 
     if will_spawn_child_runners:
         failures = run_child_runners(args, wal_path)

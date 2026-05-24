@@ -18,6 +18,8 @@ Common overrides:
   PAPER_BENCHMARK_LIMIT        20
   PAPER_BENCHMARK_MODEL        deepseek-v4-flash
   PAPER_BENCHMARK_TIMEOUT      180
+  PAPER_BENCHMARK_COMMUNITY    skipped|completed
+  PAPER_BENCHMARK_COMPACTION_WAL
 USAGE
 }
 
@@ -32,6 +34,8 @@ MODE="${PAPER_BENCHMARK_MODE:-agent}"
 LIMIT="${PAPER_BENCHMARK_LIMIT:-20}"
 MODEL="${PAPER_BENCHMARK_MODEL:-deepseek-v4-flash}"
 TIMEOUT="${PAPER_BENCHMARK_TIMEOUT:-180}"
+COMMUNITY_COMPACTION="${PAPER_BENCHMARK_COMMUNITY:-skipped}"
+COMPACTION_WAL="${PAPER_BENCHMARK_COMPACTION_WAL:-}"
 
 if [ ! -d "$ROOT" ]; then
   echo "paper benchmark failed: artifact root not found: $ROOT" >&2
@@ -96,6 +100,8 @@ fi
   --recall-paths 2 \
   --max-agent-steps 5 \
   --llm-timeout-seconds "$TIMEOUT" \
+  --community-compaction "$COMMUNITY_COMPACTION" \
+  --compaction-wal "$COMPACTION_WAL" \
   --resume
 
 python3 scripts/check_paper_benchmark_result.py \
@@ -104,6 +110,7 @@ python3 scripts/check_paper_benchmark_result.py \
   --progress "$PROGRESS" \
   --dataset "$DATASET" \
   --mode "$MODE" \
-  --limit "$LIMIT"
+  --limit "$LIMIT" \
+  --community-compaction "$COMMUNITY_COMPACTION"
 
 echo "paper benchmark smoke passed: $OUTPUT"

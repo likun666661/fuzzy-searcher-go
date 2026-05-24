@@ -67,6 +67,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recall-paths", type=int, default=2)
     parser.add_argument("--max-agent-steps", type=int, default=5)
     parser.add_argument("--llm-timeout-seconds", type=float, default=180.0)
+    parser.add_argument("--community-compaction", choices=["skipped", "completed"], default="skipped")
+    parser.add_argument("--compaction-wal", default="")
     parser.add_argument("--include-private-traces", action="store_true")
     parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
@@ -563,9 +565,10 @@ def build_result(
         },
         "deviations": {
             "graph_source": "industrial_wal_full_flash",
-            "skip_communities": True,
-            "community_compaction": "skipped",
-            "note": "Uses original GraphQ/KTRetriever/Eval retrieval-answer-judge chain; graph was built by resumable WAL worker with skip_communities=true.",
+            "skip_communities": args.community_compaction != "completed",
+            "community_compaction": args.community_compaction,
+            "compaction_wal_path": args.compaction_wal,
+            "note": "Uses original GraphQ/KTRetriever/Eval retrieval-answer-judge chain; graph was built by resumable WAL worker.",
         },
         "model": {
             "answer_model": os.getenv("LLM_MODEL", ""),
