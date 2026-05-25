@@ -77,6 +77,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--retry-failed", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
+    parser.add_argument("--runtime-preflight-only", action="store_true")
     return parser.parse_args()
 
 
@@ -128,6 +129,22 @@ def load_chunks(path: str) -> dict[str, str]:
     if not chunks:
         raise SystemExit(f"paper_benchmark_invalid_chunks: no chunks loaded from {path}")
     return chunks
+
+
+def validate_retriever_chunks(kt_retriever: Any, expected_chunks: dict[str, str], chunk_path: str) -> None:
+    expected_count = len(expected_chunks)
+    actual_count = len(getattr(kt_retriever, "chunk2id", {}) or {})
+    index_count = len(getattr(kt_retriever, "chunk_id_to_index", {}) or {})
+    if actual_count != expected_count:
+        raise SystemExit(
+            f"paper_benchmark_chunk_artifact_mismatch: retriever chunks {actual_count} "
+            f"!= artifact chunks {expected_count}: {chunk_path}"
+        )
+    if expected_count and index_count != expected_count:
+        raise SystemExit(
+            f"paper_benchmark_chunk_index_mismatch: chunk index {index_count} "
+            f"!= artifact chunks {expected_count}: {chunk_path}"
+        )
 
 
 def validate_input_paths(args: argparse.Namespace) -> None:
@@ -620,6 +637,7 @@ def build_preflight_result(
     total: int,
     checkpoint_path: str,
     progress_path: str,
+    runtime: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     checkpoint_rows = 0
     checkpoint_succeeded = 0
@@ -661,6 +679,7 @@ def build_preflight_result(
             "succeeded": checkpoint_succeeded,
             "failed": checkpoint_failed,
         },
+        "runtime": runtime or {},
         "ready": True,
         "checked_at": now_iso(),
     }
@@ -889,6 +908,18 @@ def main() -> int:
     kt_retriever.chunk_embeddings_precomputed = False
     apply_prompt_mode(kt_retriever, args)
     kt_retriever._precompute_chunk_embeddings()
+    validate_retriever_chunks(kt_retriever, chunk_contents, args.chunks)
+    if args.runtime_preflight_only:
+        result = build_preflight_result(args, total, checkpoint_path, progress_path, {
+            "retriever_chunk_count": len(kt_retriever.chunk2id),
+            "chunk_index_count": len(kt_retriever.chunk_id_to_index),
+            "artifact_chunk_count": len(chunk_contents),
+            "graph_node_count": int(getattr(getattr(kt_retriever, "graph", None), "number_of_nodes", lambda: 0)()),
+            "graph_edge_count": int(getattr(getattr(kt_retriever, "graph", None), "number_of_edges", lambda: 0)()),
+        })
+        write_result(args.output, result)
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+        return 0
     kt_retriever.build_indices()
     evaluator = Eval()
 

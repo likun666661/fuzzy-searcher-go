@@ -24,6 +24,7 @@ Common overrides:
   PAPER_BENCHMARK_LLM_ATTEMPTS 3
   PAPER_BENCHMARK_RETRY_FAILED true|false
   PAPER_BENCHMARK_PREFLIGHT_ONLY true|false
+  PAPER_BENCHMARK_RUNTIME_PREFLIGHT_ONLY true|false
 USAGE
 }
 
@@ -46,6 +47,7 @@ LLM_RETRY_BASE="${PAPER_BENCHMARK_LLM_RETRY_BASE:-2}"
 LLM_RETRY_MAX="${PAPER_BENCHMARK_LLM_RETRY_MAX:-30}"
 RETRY_FAILED="${PAPER_BENCHMARK_RETRY_FAILED:-true}"
 PREFLIGHT_ONLY="${PAPER_BENCHMARK_PREFLIGHT_ONLY:-false}"
+RUNTIME_PREFLIGHT_ONLY="${PAPER_BENCHMARK_RUNTIME_PREFLIGHT_ONLY:-false}"
 
 if [ ! -d "$ROOT" ]; then
   echo "paper benchmark failed: artifact root not found: $ROOT" >&2
@@ -120,6 +122,10 @@ PREFLIGHT_ARG=""
 if [ "$PREFLIGHT_ONLY" = "true" ]; then
   PREFLIGHT_ARG="--preflight-only"
 fi
+RUNTIME_PREFLIGHT_ARG=""
+if [ "$RUNTIME_PREFLIGHT_ONLY" = "true" ]; then
+  RUNTIME_PREFLIGHT_ARG="--runtime-preflight-only"
+fi
 
 "$PYTHON" scripts/paper_benchmark_worker.py \
   --original-root "$ROOT" \
@@ -146,9 +152,10 @@ fi
   --compaction-wal "$COMPACTION_WAL" \
   --resume \
   ${RETRY_FAILED_ARG:+$RETRY_FAILED_ARG} \
-  ${PREFLIGHT_ARG:+$PREFLIGHT_ARG}
+  ${PREFLIGHT_ARG:+$PREFLIGHT_ARG} \
+  ${RUNTIME_PREFLIGHT_ARG:+$RUNTIME_PREFLIGHT_ARG}
 
-if [ "$PREFLIGHT_ONLY" = "true" ]; then
+if [ "$PREFLIGHT_ONLY" = "true" ] || [ "$RUNTIME_PREFLIGHT_ONLY" = "true" ]; then
   echo "paper benchmark preflight passed: $OUTPUT"
   exit 0
 fi
