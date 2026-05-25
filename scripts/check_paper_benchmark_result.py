@@ -40,6 +40,7 @@ def main() -> int:
     parser.add_argument("--dataset", default="")
     parser.add_argument("--mode", choices=["agent", "noagent"], default="")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--prompt-mode", choices=["reject", "open"], default="")
     parser.add_argument("--community-compaction", choices=["skipped", "completed"], default="skipped")
     parser.add_argument("--allow-private-traces", action="store_true")
     args = parser.parse_args()
@@ -77,12 +78,27 @@ def main() -> int:
     require(paper_config.get("enable_high_recall") is True, "high recall must be enabled", errors)
     require(paper_config.get("enable_reranking") is True, "reranking must be enabled", errors)
 
+    parameters = result.get("parameters") or {}
+    require(isinstance(parameters.get("llm_max_attempts"), int), "llm_max_attempts must be recorded", errors)
+    require(isinstance(parameters.get("retry_failed"), bool), "retry_failed must be recorded", errors)
+    require(isinstance(parameters.get("llm_retry_count"), int), "llm_retry_count must be recorded", errors)
+    if args.prompt_mode:
+        require(parameters.get("prompt_mode") == args.prompt_mode, f"prompt_mode != {args.prompt_mode}", errors)
+
+    method_profile = result.get("method_profile") or {}
+    require(method_profile.get("schema_version") == "youtu-method-profile/v1", "bad method_profile schema", errors)
+    if args.prompt_mode:
+        require(method_profile.get("prompt_mode") == args.prompt_mode, "method_profile prompt_mode mismatch", errors)
+    require(method_profile.get("runtime_profile"), "missing method_profile runtime_profile", errors)
+
     deviations = result.get("deviations") or {}
     expect_compacted = args.community_compaction == "completed"
     require(deviations.get("skip_communities") is (not expect_compacted), f"skip_communities deviation must be {not expect_compacted}", errors)
     require(deviations.get("community_compaction") == args.community_compaction, "community compaction deviation mismatch", errors)
     if expect_compacted:
-        require(bool(deviations.get("compaction_wal_path")), "compacted benchmark must reference compaction_wal_path", errors)
+        compaction_wal = deviations.get("compaction_wal_path")
+        require(bool(compaction_wal), "compacted benchmark must reference compaction_wal_path", errors)
+        require(bool(compaction_wal and Path(compaction_wal).exists()), "compaction_wal_path does not exist", errors)
 
     artifacts = result.get("artifacts") or {}
     for key in ("qa_path", "graph_path", "chunks_path", "schema_path", "checkpoint_path", "progress_path"):
@@ -105,6 +121,8 @@ def main() -> int:
             require(item.get("schema_version") == "paper-benchmark-item/v1", f"item {idx} bad schema", errors)
             require(item.get("mode") == result.get("mode"), f"item {idx} mode mismatch", errors)
             require(item.get("judge") in {"0", "1"}, f"item {idx} judge must be 0/1", errors)
+            require(isinstance(item.get("llm_call_count"), int), f"item {idx} missing llm_call_count", errors)
+            require(isinstance(item.get("llm_retry_count"), int), f"item {idx} missing llm_retry_count", errors)
             require((item.get("mapping_score") or {}).get("schema_version") == "anonymized-mapping-score/v1", f"item {idx} bad mapping_score", errors)
             if not args.allow_private_traces:
                 require("detail" not in item, f"item {idx} contains private detail trace", errors)

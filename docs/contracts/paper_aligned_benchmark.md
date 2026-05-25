@@ -195,6 +195,21 @@ The service may validate that the required key is present, but it must not log,
 persist, echo, or include the key in stdout summaries, job specs, events,
 checkpoint rows, result artifacts, operation history, or workflow records.
 
+Phase 35 hardens the long-run method benchmark defaults:
+
+- `prompt_mode=open` is the default service method profile. It still prefers
+  retrieved graph/chunk context, but does not force the model to reject when
+  context is incomplete. Use `prompt_mode=reject` only for a stricter ablation.
+- `llm_max_attempts`, `llm_retry_base_seconds`, and
+  `llm_retry_max_seconds` apply to decomposition, answer generation, agent
+  steps, final answers, and LLM judge calls.
+- `retry_failed=true` means resume skips successful checkpoint rows but reruns
+  failed rows, so provider/network failures can be repaired without rerunning
+  already answered questions.
+- `preflight_only=true` validates QA/graph/chunks/schema/community WAL paths
+  and selected QA count without importing the original repo or making model
+  calls.
+
 ## Output Artifact
 
 Successful worker execution requires `output_path` to exist and parse as
@@ -214,10 +229,19 @@ Successful worker execution requires `output_path` to exist and parse as
   "started_at": "2026-05-23T00:00:00Z",
   "finished_at": "2026-05-23T00:30:00Z",
   "duration_ms": 1800000,
+  "method_profile": {
+    "schema_version": "youtu-method-profile/v1",
+    "method": "youtu-graphrag",
+    "mode": "agent",
+    "prompt_mode": "open",
+    "community_compaction": "completed",
+    "runtime_profile": "industrial_wal_checkpointed",
+    "model_profile": "deepseek-v4-flash"
+  },
   "artifacts": {
     "qa_path": "/abs/path/youtu-graphrag/data/anony_chs/final_qa_pairs.json",
-    "graph_path": "/abs/path/youtu-graphrag/output/graphs/anony_chs_full_flash_new.json",
-    "chunks_path": "/abs/path/youtu-graphrag/output/chunks/anony_chs_full_flash.txt",
+    "graph_path": "/abs/path/youtu-graphrag/output/graphs/anony_chs_full_flash_community.json",
+    "chunks_path": "/abs/path/youtu-graphrag/output/chunks/anony_chs_full_flash_community.txt",
     "schema_path": "/abs/path/youtu-graphrag/schemas/anony_chs.json"
   },
   "paper_config": {
@@ -233,8 +257,9 @@ Successful worker execution requires `output_path` to exist and parse as
   },
   "deviations": {
     "graph_source": "industrial_wal_full_flash",
-    "skip_communities": true,
-    "community_compaction": "skipped"
+    "skip_communities": false,
+    "community_compaction": "completed",
+    "compaction_wal_path": "/abs/path/youtu-graphrag/output/graph_wal/anony_chs_full_flash_community.compaction.jsonl"
   },
   "model": {
     "answer_model": "deepseek-v4-pro",
@@ -260,6 +285,8 @@ Successful worker execution requires `output_path` to exist and parse as
       "judge": "1",
       "correct": true,
       "mode": "agent",
+      "llm_call_count": 4,
+      "llm_retry_count": 0,
       "decomposition": {
         "sub_question_count": 2,
         "involved_types": {
@@ -307,6 +334,7 @@ Minimum required fields:
 - `accuracy`
 - `paper_config`
 - `deviations`
+- `method_profile`
 - `items`
 
 For AnonyRAG, result artifacts should retain the deterministic anonymized
@@ -339,6 +367,8 @@ Resume rules:
 
 - `resume=false`: ignore any existing checkpoint for scheduling.
 - `resume=true`: skip checkpoint rows with terminal `id`/`index`.
+- `resume=true` plus `retry_failed=true`: skip only successful checkpoint rows
+  and rerun rows whose latest terminal state is failed.
 - malformed checkpoint JSON must fail fast with
   `paper_benchmark_checkpoint_invalid`;
 - final `paper-benchmark-result/v1.items` must include resumed and newly

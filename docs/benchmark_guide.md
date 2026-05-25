@@ -388,17 +388,34 @@ YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag make benchmark-smoke
 
 ```text
 QA:     youtu-graphrag/data/anony_chs/final_qa_pairs.json
-graph:  youtu-graphrag/output/graphs/anony_chs_full_flash_new.json
-chunks: youtu-graphrag/output/chunks/anony_chs_full_flash.txt
+graph:  youtu-graphrag/output/graphs/anony_chs_full_flash_community.json
+chunks: youtu-graphrag/output/chunks/anony_chs_full_flash_community.txt
 schema: youtu-graphrag/schemas/anony_chs.json
+wal:    youtu-graphrag/output/graph_wal/anony_chs_full_flash_community.compaction.jsonl
 ```
 
 这条路径应使用原 repo 的 `GraphQ` decomposition、`KTRetriever`
 retrieval/answer，以及 `utils/eval.py` 的 LLM judge。主方法用 `mode=agent`；
-`mode=noagent` 只能作为 ablation 单独记录。当前 full graph 是工业化 WAL /
-multi-runner 构图产物，并且 `skip_communities=true`，所以结果报告里必须明确
-这点：这是 paper retrieval/answer/eval 口径加 WAL graph artifact，不是原 repo
-community compaction 的逐字复刻。
+`mode=noagent` 只能作为 ablation 单独记录。当前建议的工程口径是
+`prompt_mode=open`、`community_compaction=completed`、DeepSeek V4 Flash/Pro、
+`retry_failed=true`。它不是锁论文旧模型的复现，而是使用论文
+retrieval/answer/eval 链路加工业化 WAL / multi-runner / replay-only community
+compaction runtime 的方法评测。
+
+全量跑之前先做 no-model preflight：
+
+```bash
+YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag \
+PAPER_BENCHMARK_LIMIT=688 \
+PAPER_BENCHMARK_COMMUNITY=completed \
+PAPER_BENCHMARK_PROMPT_MODE=open \
+PAPER_BENCHMARK_PREFLIGHT_ONLY=true \
+scripts/run_paper_benchmark_smoke.sh
+```
+
+正式跑时去掉 `PAPER_BENCHMARK_PREFLIGHT_ONLY` 即可；如果中途网络或 provider
+失败，保留同一 checkpoint 并用默认 `PAPER_BENCHMARK_RETRY_FAILED=true`
+续跑，只会重试失败项。
 
 详细请求、输出、checkpoint 和验收标准见
 `docs/contracts/paper_aligned_benchmark.md`。

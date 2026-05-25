@@ -67,10 +67,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--recall-paths", type=int, default=2)
     parser.add_argument("--max-agent-steps", type=int, default=5)
     parser.add_argument("--llm-timeout-seconds", type=float, default=180.0)
+    parser.add_argument("--llm-max-attempts", type=int, default=3)
+    parser.add_argument("--llm-retry-base-seconds", type=float, default=2.0)
+    parser.add_argument("--llm-retry-max-seconds", type=float, default=30.0)
+    parser.add_argument("--prompt-mode", choices=["reject", "open"], default="reject")
     parser.add_argument("--community-compaction", choices=["skipped", "completed"], default="skipped")
     parser.add_argument("--compaction-wal", default="")
     parser.add_argument("--include-private-traces", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--retry-failed", action="store_true")
+    parser.add_argument("--preflight-only", action="store_true")
     return parser.parse_args()
 
 
@@ -133,6 +139,9 @@ def validate_input_paths(args: argparse.Namespace) -> None:
     ):
         if not path or not os.path.isfile(path):
             raise SystemExit(f"paper_benchmark_missing_artifact: {label} {path}")
+    if args.community_compaction == "completed":
+        if not args.compaction_wal or not os.path.isfile(args.compaction_wal):
+            raise SystemExit(f"paper_benchmark_missing_artifact: compaction_wal {args.compaction_wal}")
 
 
 def configure_original_repo(root: str) -> None:
@@ -210,6 +219,92 @@ def normalize_judge(value: str) -> str:
     return match.group(0)
 
 
+def new_retry_stats() -> dict[str, Any]:
+    return {
+        "llm_call_count": 0,
+        "llm_retry_count": 0,
+        "llm_attempts": [],
+    }
+
+
+def retry_sleep_seconds(args: argparse.Namespace, attempt: int) -> float:
+    base = max(float(args.llm_retry_base_seconds or 0), 0.0)
+    cap = max(float(args.llm_retry_max_seconds or 0), base)
+    return min(cap, base * (2 ** max(attempt - 1, 0)))
+
+
+def call_llm_with_retry(
+    args: argparse.Namespace,
+    stats: dict[str, Any],
+    label: str,
+    fn: Any,
+) -> Any:
+    max_attempts = max(int(args.llm_max_attempts or 1), 1)
+    last_exc: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        stats["llm_call_count"] = int(stats.get("llm_call_count") or 0) + 1
+        try:
+            value = fn()
+            if isinstance(value, str) and not value.strip():
+                raise RuntimeError(f"paper_benchmark_empty_llm_response: {label}")
+            stats["llm_attempts"].append({
+                "label": label,
+                "attempt": attempt,
+                "status": "succeeded",
+            })
+            return value
+        except Exception as exc:  # pragma: no cover - provider-specific errors vary.
+            last_exc = exc
+            retryable = attempt < max_attempts and not STOP_REQUESTED
+            stats["llm_attempts"].append({
+                "label": label,
+                "attempt": attempt,
+                "status": "failed",
+                "retryable": retryable,
+                "error": str(exc)[:300],
+            })
+            if not retryable:
+                break
+            stats["llm_retry_count"] = int(stats.get("llm_retry_count") or 0) + 1
+            time.sleep(retry_sleep_seconds(args, attempt))
+    assert last_exc is not None
+    raise last_exc
+
+
+def open_answer_prompt(dataset: str, question: str, context: str) -> str:
+    if dataset.endswith("_chs") or "_chs" in dataset:
+        return f"""你是一个知识图谱问答助手。请优先使用给定的 Triples 和 Chunks 回答问题。
+
+如果上下文中有足够证据，请直接给出答案；如果上下文不完整，但问题可以结合上下文和常识推断，请给出最可能的答案。不要因为上下文不完整而固定回答“无法回答”。
+
+问题：
+{question}
+
+知识上下文：
+{context}
+
+请给出简洁答案。对于匿名化映射题，请尽量按题目需要输出 PERSON#xxx、LOCATION#xxx 等编号到实体的对应关系。
+"""
+    return f"""You are a knowledge graph question-answering assistant. Prefer the provided Triples and Chunks as evidence.
+
+If the context is sufficient, answer directly. If the context is incomplete but the answer can be inferred from the context and general knowledge, provide the most likely answer. Do not default to refusing solely because the context is incomplete.
+
+Question:
+{question}
+
+Knowledge Context:
+{context}
+
+Give a concise answer. For anonymized mapping questions, include the requested PERSON#xxx or LOCATION#xxx mappings when possible.
+"""
+
+
+def apply_prompt_mode(kt_retriever: Any, args: argparse.Namespace) -> None:
+    if args.prompt_mode != "open":
+        return
+    kt_retriever.generate_prompt = lambda question, context: open_answer_prompt(args.dataset, question, context)
+
+
 def summarize_detail(detail: dict[str, Any]) -> dict[str, Any]:
     logs = detail.get("logs") if isinstance(detail.get("logs"), list) else []
     initial = detail.get("initial_result") if isinstance(detail.get("initial_result"), dict) else {}
@@ -273,6 +368,8 @@ def initial_question_decomposition(
     config: Any,
     question: str,
     schema_path: str,
+    args: argparse.Namespace,
+    retry_stats: dict[str, Any],
 ) -> dict[str, Any]:
     all_triples: set[str] = set()
     all_chunk_ids: set[str] = set()
@@ -282,7 +379,12 @@ def initial_question_decomposition(
     involved_types = {"nodes": [], "relations": [], "attributes": []}
 
     try:
-        decomposition_result = graphq.decompose(question, schema_path)
+        decomposition_result = call_llm_with_retry(
+            args,
+            retry_stats,
+            "decompose",
+            lambda: graphq.decompose(question, schema_path),
+        )
         sub_questions = decomposition_result.get("sub_questions", [])
         involved_types = decomposition_result.get("involved_types", involved_types)
     except Exception as exc:
@@ -353,7 +455,12 @@ def initial_question_decomposition(
     context = "=== Triples ===\n" + "\n".join(dedup_triples)
     context += "\n=== Chunks ===\n" + "\n".join(dedup_chunk_contents)
     prompt = kt_retriever.generate_prompt(question, context)
-    answer = kt_retriever.generate_answer(prompt)
+    answer = call_llm_with_retry(
+        args,
+        retry_stats,
+        "initial_answer",
+        lambda: kt_retriever.generate_answer(prompt),
+    )
     return {
         "decomposition_result": decomposition_result,
         "sub_questions": sub_questions,
@@ -374,9 +481,11 @@ def run_agent_question(
     qa: dict[str, Any],
     schema_path: str,
     max_steps: int,
+    args: argparse.Namespace,
+    retry_stats: dict[str, Any],
 ) -> dict[str, Any]:
     question = qa["_question"]
-    initial_result = initial_question_decomposition(graphq, kt_retriever, config, question, schema_path)
+    initial_result = initial_question_decomposition(graphq, kt_retriever, config, question, schema_path, args, retry_stats)
     all_triples = set(initial_result["triples"])
     all_chunk_ids = set(initial_result["chunk_ids"])
     all_chunk_contents = {
@@ -417,7 +526,12 @@ Instructions:
 
 Your reasoning:
 """
-        response = kt_retriever.generate_answer(ircot_prompt)
+        response = call_llm_with_retry(
+            args,
+            retry_stats,
+            f"agent_step_{step}",
+            lambda: kt_retriever.generate_answer(ircot_prompt),
+        )
         thoughts.append(response)
         logs.append({
             "step": step,
@@ -449,7 +563,12 @@ Your reasoning:
     final_context = "=== Final Triples ===\n" + "\n".join(deduplicate_triples(list(all_triples)))
     final_context += "\n=== Final Chunks ===\n" + "\n".join(merge_chunk_contents(list(set(all_chunk_ids)), all_chunk_contents))
     final_prompt = kt_retriever.generate_prompt(question, final_context)
-    answer = kt_retriever.generate_answer(final_prompt)
+    answer = call_llm_with_retry(
+        args,
+        retry_stats,
+        "final_answer",
+        lambda: kt_retriever.generate_answer(final_prompt),
+    )
     return {
         "answer": answer,
         "initial_answer": initial_result["initial_answer"],
@@ -468,8 +587,16 @@ Your reasoning:
     }
 
 
-def run_noagent_question(graphq: Any, kt_retriever: Any, config: Any, qa: dict[str, Any], schema_path: str) -> dict[str, Any]:
-    result = initial_question_decomposition(graphq, kt_retriever, config, qa["_question"], schema_path)
+def run_noagent_question(
+    graphq: Any,
+    kt_retriever: Any,
+    config: Any,
+    qa: dict[str, Any],
+    schema_path: str,
+    args: argparse.Namespace,
+    retry_stats: dict[str, Any],
+) -> dict[str, Any]:
+    result = initial_question_decomposition(graphq, kt_retriever, config, qa["_question"], schema_path, args, retry_stats)
     return {
         "answer": result["initial_answer"],
         "triples_count": len(result["triples"]),
@@ -488,6 +615,57 @@ def write_result(path: str, result: dict[str, Any]) -> None:
         f.write("\n")
 
 
+def build_preflight_result(
+    args: argparse.Namespace,
+    total: int,
+    checkpoint_path: str,
+    progress_path: str,
+) -> dict[str, Any]:
+    checkpoint_rows = 0
+    checkpoint_succeeded = 0
+    checkpoint_failed = 0
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        completed = load_checkpoint(checkpoint_path)
+        checkpoint_rows = len(completed)
+        for record in completed.values():
+            if record.get("status") == "succeeded":
+                checkpoint_succeeded += 1
+            else:
+                checkpoint_failed += 1
+    return {
+        "schema_version": "paper-benchmark-preflight/v1",
+        "dataset": args.dataset,
+        "mode": args.mode,
+        "question_count": total,
+        "prompt_mode": args.prompt_mode,
+        "community_compaction": args.community_compaction,
+        "artifacts": {
+            "qa_path": args.qa,
+            "graph_path": args.graph,
+            "chunks_path": args.chunks,
+            "schema_path": args.schema,
+            "cache_dir": args.cache_dir,
+            "checkpoint_path": checkpoint_path,
+            "progress_path": progress_path,
+            "compaction_wal_path": args.compaction_wal,
+        },
+        "retry": {
+            "retry_failed": args.retry_failed,
+            "llm_max_attempts": max(int(args.llm_max_attempts or 1), 1),
+            "llm_retry_base_seconds": args.llm_retry_base_seconds,
+            "llm_retry_max_seconds": args.llm_retry_max_seconds,
+            "llm_timeout_seconds": args.llm_timeout_seconds,
+        },
+        "checkpoint": {
+            "records": checkpoint_rows,
+            "succeeded": checkpoint_succeeded,
+            "failed": checkpoint_failed,
+        },
+        "ready": True,
+        "checked_at": now_iso(),
+    }
+
+
 def build_result(
     args: argparse.Namespace,
     results: list[dict[str, Any]],
@@ -500,6 +678,8 @@ def build_result(
     answered = sum(1 for item in results if item.get("status") == "succeeded")
     failed = sum(1 for item in results if item.get("status") != "succeeded")
     correct = sum(1 for item in results if item.get("correct"))
+    llm_call_count = sum(int(item.get("llm_call_count") or 0) for item in results)
+    llm_retry_count = sum(int(item.get("llm_retry_count") or 0) for item in results)
 
     mapping_items = [item.get("mapping_score") or {} for item in results if (item.get("mapping_score") or {}).get("applicable")]
     mapping_expected_count = sum(int(score.get("expected_count") or 0) for score in mapping_items)
@@ -550,7 +730,23 @@ def build_result(
             "llm_model": os.getenv("LLM_MODEL", ""),
             "llm_base_url": os.getenv("LLM_BASE_URL", ""),
             "llm_timeout_seconds": args.llm_timeout_seconds,
+            "llm_max_attempts": max(int(args.llm_max_attempts or 1), 1),
+            "llm_retry_base_seconds": args.llm_retry_base_seconds,
+            "llm_retry_max_seconds": args.llm_retry_max_seconds,
+            "retry_failed": args.retry_failed,
+            "prompt_mode": args.prompt_mode,
             "include_private_traces": args.include_private_traces,
+            "llm_call_count": llm_call_count,
+            "llm_retry_count": llm_retry_count,
+        },
+        "method_profile": {
+            "schema_version": "youtu-method-profile/v1",
+            "method": "youtu-graphrag",
+            "mode": args.mode,
+            "prompt_mode": args.prompt_mode,
+            "community_compaction": args.community_compaction,
+            "runtime_profile": "industrial_wal_checkpointed",
+            "model_profile": os.getenv("LLM_MODEL", ""),
         },
         "paper_config": {
             "constructor_trigger": False,
@@ -586,11 +782,17 @@ def main() -> int:
     validate_input_paths(args)
     qa_items = load_qa(args.qa, args.offset, args.limit)
     chunk_contents = load_chunks(args.chunks)
+    checkpoint_path = args.checkpoint or str(Path(args.output).with_suffix(".checkpoint.jsonl"))
+    progress_path = args.progress or str(Path(args.output).with_suffix(".progress.json"))
+    if args.preflight_only:
+        result = build_preflight_result(args, len(qa_items), checkpoint_path, progress_path)
+        write_result(args.output, result)
+        print(json.dumps(result, ensure_ascii=False), flush=True)
+        return 0
+
     configure_original_repo(args.original_root)
     patch_llm_timeout(args.llm_timeout_seconds)
 
-    checkpoint_path = args.checkpoint or str(Path(args.output).with_suffix(".checkpoint.jsonl"))
-    progress_path = args.progress or str(Path(args.output).with_suffix(".progress.json"))
     completed = load_checkpoint(checkpoint_path) if args.resume else {}
     total = len(qa_items)
     started_time = time.time()
@@ -603,6 +805,8 @@ def main() -> int:
             continue
         item = existing.get("item")
         if isinstance(item, dict):
+            if args.retry_failed and item.get("status") != "succeeded":
+                continue
             results.append(sanitize_item(item, args.include_private_traces))
 
     if args.resume and len(results) == total:
@@ -612,18 +816,21 @@ def main() -> int:
             "schema_version": PROGRESS_SCHEMA_VERSION,
             "dataset": args.dataset,
             "mode": args.mode,
+            "prompt_mode": args.prompt_mode,
             "total": total,
             "completed": len(results),
             "answered": result["answered_count"],
             "failed": result["failed_count"],
             "correct": result["correct_count"],
             "accuracy": result["accuracy"],
+            "llm_retry_count": result["parameters"].get("llm_retry_count", 0),
             "updated_at": now_iso(),
         })
         print(json.dumps({
             "schema_version": PROGRESS_SCHEMA_VERSION,
             "dataset": args.dataset,
             "mode": args.mode,
+            "prompt_mode": args.prompt_mode,
             "completed": len(results),
             "total": total,
             "correct": result["correct_count"],
@@ -680,6 +887,7 @@ def main() -> int:
     kt_retriever.chunk_id_to_index.clear()
     kt_retriever.index_to_chunk_id.clear()
     kt_retriever.chunk_embeddings_precomputed = False
+    apply_prompt_mode(kt_retriever, args)
     kt_retriever._precompute_chunk_embeddings()
     kt_retriever.build_indices()
     evaluator = Eval()
@@ -709,13 +917,19 @@ def main() -> int:
         answer = ""
         judge = "0"
         detail: dict[str, Any] = {}
+        retry_stats = new_retry_stats()
         try:
             if args.mode == "agent":
-                detail = run_agent_question(graphq, kt_retriever, config, qa, args.schema, args.max_agent_steps)
+                detail = run_agent_question(graphq, kt_retriever, config, qa, args.schema, args.max_agent_steps, args, retry_stats)
             else:
-                detail = run_noagent_question(graphq, kt_retriever, config, qa, args.schema)
+                detail = run_noagent_question(graphq, kt_retriever, config, qa, args.schema, args, retry_stats)
             answer = str(detail.get("answer") or "")
-            judge = normalize_judge(evaluator.eval(qa["_question"], qa["_answer"], answer))
+            judge = call_llm_with_retry(
+                args,
+                retry_stats,
+                "judge",
+                lambda: normalize_judge(evaluator.eval(qa["_question"], qa["_answer"], answer)),
+            )
             item_correct = judge == "1"
             answered += 1
             if item_correct:
@@ -740,6 +954,9 @@ def main() -> int:
             "error": error,
             "mode": args.mode,
             "duration_seconds": time.time() - item_started,
+            "llm_call_count": retry_stats.get("llm_call_count", 0),
+            "llm_retry_count": retry_stats.get("llm_retry_count", 0),
+            "llm_attempts": retry_stats.get("llm_attempts", []),
             "retrieval": {
                 "triples_count": detail.get("triples_count", 0),
                 "chunk_count": detail.get("chunk_count", 0),
@@ -764,18 +981,21 @@ def main() -> int:
             "schema_version": PROGRESS_SCHEMA_VERSION,
             "dataset": args.dataset,
             "mode": args.mode,
+            "prompt_mode": args.prompt_mode,
             "total": total,
             "completed": len(results),
             "answered": answered,
             "failed": failed,
             "correct": correct,
             "accuracy": correct / total if total else 0.0,
+            "llm_retry_count": sum(int(item.get("llm_retry_count") or 0) for item in results),
             "updated_at": now_iso(),
         })
         print(json.dumps({
             "schema_version": PROGRESS_SCHEMA_VERSION,
             "dataset": args.dataset,
             "mode": args.mode,
+            "prompt_mode": args.prompt_mode,
             "completed": len(results),
             "total": total,
             "correct": correct,
