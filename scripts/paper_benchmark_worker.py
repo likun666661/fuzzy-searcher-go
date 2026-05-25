@@ -351,8 +351,18 @@ def deduplicate_triples(triples: list[str]) -> list[str]:
     return list(set(triples))
 
 
-def merge_chunk_contents(chunk_ids: list[str], chunk_contents: dict[str, str]) -> list[str]:
-    return [chunk_contents.get(chunk_id, f"[Missing content for chunk {chunk_id}]") for chunk_id in chunk_ids]
+def merge_chunk_contents(
+    chunk_ids: list[str],
+    chunk_contents: dict[str, str],
+    fallback_chunks: dict[str, str] | None = None,
+) -> list[str]:
+    fallback_chunks = fallback_chunks or {}
+    return [
+        chunk_contents.get(chunk_id)
+        or fallback_chunks.get(chunk_id)
+        or f"[Missing content for chunk {chunk_id}]"
+        for chunk_id in chunk_ids
+    ]
 
 
 def rerank_chunks_by_keywords(chunks: list[str], question: str, top_k: int) -> list[str]:
@@ -451,7 +461,7 @@ def initial_question_decomposition(
 
     dedup_triples = deduplicate_triples(list(all_triples))
     dedup_chunk_ids = list(set(all_chunk_ids))
-    dedup_chunk_contents = merge_chunk_contents(dedup_chunk_ids, all_chunk_contents)
+    dedup_chunk_contents = merge_chunk_contents(dedup_chunk_ids, all_chunk_contents, kt_retriever.chunk2id)
     if not dedup_triples and not dedup_chunk_contents:
         dedup_triples = ["No relevant information found"]
         dedup_chunk_contents = ["No relevant chunks found"]
@@ -517,7 +527,7 @@ def run_agent_question(
     for step in range(1, max_steps + 1):
         dedup_triples = deduplicate_triples(list(all_triples))
         dedup_chunk_ids = list(set(all_chunk_ids))
-        dedup_chunk_contents = merge_chunk_contents(dedup_chunk_ids, all_chunk_contents)
+        dedup_chunk_contents = merge_chunk_contents(dedup_chunk_ids, all_chunk_contents, kt_retriever.chunk2id)
         context = "=== Triples ===\n" + "\n".join(dedup_triples)
         context += "\n=== Chunks ===\n" + "\n".join(dedup_chunk_contents)
         ircot_prompt = f"""
@@ -578,7 +588,7 @@ Your reasoning:
         all_chunk_contents.update(new_chunk_contents)
 
     final_context = "=== Final Triples ===\n" + "\n".join(deduplicate_triples(list(all_triples)))
-    final_context += "\n=== Final Chunks ===\n" + "\n".join(merge_chunk_contents(list(set(all_chunk_ids)), all_chunk_contents))
+    final_context += "\n=== Final Chunks ===\n" + "\n".join(merge_chunk_contents(list(set(all_chunk_ids)), all_chunk_contents, kt_retriever.chunk2id))
     final_prompt = kt_retriever.generate_prompt(question, final_context)
     answer = call_llm_with_retry(
         args,
@@ -590,7 +600,7 @@ Your reasoning:
         "answer": answer,
         "initial_answer": initial_result["initial_answer"],
         "triples_count": len(deduplicate_triples(list(all_triples))),
-        "chunk_count": len(merge_chunk_contents(list(set(all_chunk_ids)), all_chunk_contents)),
+        "chunk_count": len(merge_chunk_contents(list(set(all_chunk_ids)), all_chunk_contents, kt_retriever.chunk2id)),
         "ircot_steps": len(logs),
         "thoughts": thoughts,
         "logs": logs,
