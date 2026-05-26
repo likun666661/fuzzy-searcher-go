@@ -32,6 +32,26 @@ def check_no_secret(body: str, errors: list[str]) -> None:
             require(value not in body, f"artifact leaks {name}", errors)
 
 
+def checkpoint_ids(path: Path, errors: list[str], label: str) -> list[str]:
+    ids: list[str] = []
+    if not path.exists():
+        errors.append(f"{label} checkpoint missing: {path}")
+        return ids
+    with path.open("r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                errors.append(f"{label} checkpoint line {line_no} invalid JSON: {exc}")
+                continue
+            require(row.get("schema_version") == "paper-benchmark-checkpoint-item/v1", f"{label} checkpoint line {line_no} bad schema", errors)
+            ids.append(str(row.get("id") or ""))
+    return ids
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--result", required=True)
@@ -97,8 +117,14 @@ def main() -> int:
         require(isinstance(sharding, dict), "sharding must be an object", errors)
         if isinstance(sharding, dict):
             require(sharding.get("schema_version") == "paper-benchmark-sharding/v1", "bad sharding schema", errors)
-            require(isinstance(sharding.get("shard_count"), int), "sharding shard_count must be numeric", errors)
-            require(isinstance(sharding.get("shard_checkpoints"), list), "sharding shard_checkpoints must be a list", errors)
+            shard_count = sharding.get("shard_count")
+            require(isinstance(shard_count, int), "sharding shard_count must be numeric", errors)
+            for key in ("shard_outputs", "shard_checkpoints", "shard_progress"):
+                values = sharding.get(key)
+                require(isinstance(values, list), f"sharding {key} must be a list", errors)
+                if isinstance(values, list) and isinstance(shard_count, int):
+                    require(len(values) == shard_count, f"sharding {key} length must match shard_count", errors)
+            require(sharding.get("completed_ids") == result.get("completed_count"), "sharding completed_ids must match completed_count", errors)
 
     deviations = result.get("deviations") or {}
     expect_compacted = args.community_compaction == "completed"
@@ -139,24 +165,26 @@ def main() -> int:
             require("detail_summary" in item, f"item {idx} missing detail_summary", errors)
 
     checkpoint_path = Path(args.checkpoint or artifacts.get("checkpoint_path") or "")
+    main_checkpoint_ids: list[str] = []
     if str(checkpoint_path):
         require(checkpoint_path.exists(), f"checkpoint missing: {checkpoint_path}", errors)
         if checkpoint_path.exists():
             check_no_secret(checkpoint_path.read_text(encoding="utf-8"), errors)
-            rows = 0
-            with checkpoint_path.open("r", encoding="utf-8") as f:
-                for line_no, line in enumerate(f, 1):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    rows += 1
-                    try:
-                        row = json.loads(line)
-                    except json.JSONDecodeError as exc:
-                        errors.append(f"checkpoint line {line_no} invalid JSON: {exc}")
-                        continue
-                    require(row.get("schema_version") == "paper-benchmark-checkpoint-item/v1", f"checkpoint line {line_no} bad schema", errors)
-            require(rows >= int(result.get("completed_count") or 0), "checkpoint rows fewer than completed_count", errors)
+            main_checkpoint_ids = checkpoint_ids(checkpoint_path, errors, "main")
+            require(len(main_checkpoint_ids) == len(set(main_checkpoint_ids)), "main checkpoint contains duplicate ids", errors)
+            require(len(main_checkpoint_ids) >= int(result.get("completed_count") or 0), "checkpoint rows fewer than completed_count", errors)
+
+    if isinstance(sharding, dict):
+        shard_paths = sharding.get("shard_checkpoints")
+        if isinstance(shard_paths, list):
+            all_shard_ids: list[str] = []
+            for index, path in enumerate(shard_paths):
+                ids = checkpoint_ids(Path(str(path)), errors, f"shard {index}")
+                require(len(ids) == len(set(ids)), f"shard {index} checkpoint contains duplicate ids", errors)
+                all_shard_ids.extend(ids)
+            require(len(all_shard_ids) == len(set(all_shard_ids)), "QA ids must appear in at most one shard checkpoint", errors)
+            if main_checkpoint_ids:
+                require(set(main_checkpoint_ids) == set(all_shard_ids), "main checkpoint ids must equal merged shard checkpoint ids", errors)
 
     progress_path = Path(args.progress or artifacts.get("progress_path") or "")
     if str(progress_path):
@@ -166,6 +194,12 @@ def main() -> int:
             check_no_secret(progress_path.read_text(encoding="utf-8"), errors)
             require(progress.get("schema_version") == "paper-benchmark-progress/v1", "bad progress schema", errors)
             require(progress.get("completed") == result.get("completed_count"), "progress completed mismatch", errors)
+            if isinstance(sharding, dict):
+                require(progress.get("shard_count") == sharding.get("shard_count"), "progress shard_count mismatch", errors)
+                shards = progress.get("shards")
+                require(isinstance(shards, list), "progress shards must be a list for sharded result", errors)
+                if isinstance(shards, list) and isinstance(sharding.get("shard_count"), int):
+                    require(len(shards) == sharding.get("shard_count"), "progress shards length mismatch", errors)
 
     if errors:
         for error in errors:

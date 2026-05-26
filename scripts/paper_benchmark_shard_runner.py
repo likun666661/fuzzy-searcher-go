@@ -205,26 +205,13 @@ def read_json(path: str) -> dict[str, Any]:
 
 def aggregate_progress(args: argparse.Namespace, total: int, shard_count: int, started_at: str) -> None:
     completed = answered = failed = correct = llm_retry_count = 0
-    shards: list[dict[str, Any]] = []
-    for index in range(shard_count):
-        progress_path = shard_path(args.progress, index, shard_count)
-        if not Path(progress_path).exists():
-            shards.append({"shard_index": index, "completed": 0})
-            continue
-        progress = read_json(progress_path)
-        completed += int(progress.get("completed") or 0)
-        answered += int(progress.get("answered") or 0)
-        failed += int(progress.get("failed") or 0)
-        correct += int(progress.get("correct") or 0)
-        llm_retry_count += int(progress.get("llm_retry_count") or 0)
-        shards.append({
-            "shard_index": index,
-            "completed": int(progress.get("completed") or 0),
-            "total": int(progress.get("total") or 0),
-            "correct": int(progress.get("correct") or 0),
-            "failed": int(progress.get("failed") or 0),
-            "updated_at": progress.get("updated_at", ""),
-        })
+    shards: list[dict[str, Any]] = shard_progress_summaries(args, shard_count)
+    for shard in shards:
+        completed += int(shard.get("completed") or 0)
+        answered += int(shard.get("answered") or 0)
+        failed += int(shard.get("failed") or 0)
+        correct += int(shard.get("correct") or 0)
+        llm_retry_count += int(shard.get("llm_retry_count") or 0)
     write_progress(args.progress, {
         "schema_version": PROGRESS_SCHEMA_VERSION,
         "dataset": args.dataset,
@@ -242,6 +229,27 @@ def aggregate_progress(args: argparse.Namespace, total: int, shard_count: int, s
         "started_at": started_at,
         "updated_at": now_iso(),
     })
+
+
+def shard_progress_summaries(args: argparse.Namespace, shard_count: int) -> list[dict[str, Any]]:
+    shards: list[dict[str, Any]] = []
+    for index in range(shard_count):
+        progress_path = shard_path(args.progress, index, shard_count)
+        if not Path(progress_path).exists():
+            shards.append({"shard_index": index, "completed": 0})
+            continue
+        progress = read_json(progress_path)
+        shards.append({
+            "shard_index": index,
+            "completed": int(progress.get("completed") or 0),
+            "total": int(progress.get("total") or 0),
+            "answered": int(progress.get("answered") or 0),
+            "correct": int(progress.get("correct") or 0),
+            "failed": int(progress.get("failed") or 0),
+            "llm_retry_count": int(progress.get("llm_retry_count") or 0),
+            "updated_at": progress.get("updated_at", ""),
+        })
+    return shards
 
 
 def terminate_children(children: list[subprocess.Popen[Any]]) -> None:
@@ -304,6 +312,7 @@ def merge_results(args: argparse.Namespace, qa_items: list[dict[str, Any]], shar
         "accuracy": result["accuracy"],
         "llm_retry_count": result["parameters"].get("llm_retry_count", 0),
         "shard_count": shard_count,
+        "shards": shard_progress_summaries(args, shard_count),
         "updated_at": now_iso(),
     })
     return result

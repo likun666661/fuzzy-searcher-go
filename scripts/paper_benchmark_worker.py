@@ -819,9 +819,6 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False), flush=True)
         return 0
 
-    configure_original_repo(args.original_root)
-    patch_llm_timeout(args.llm_timeout_seconds)
-
     completed = load_checkpoint(checkpoint_path) if args.resume else {}
     total = len(qa_items)
     started_time = time.time()
@@ -868,6 +865,9 @@ def main() -> int:
             "resumed_from_checkpoint": True,
         }, ensure_ascii=False), flush=True)
         return 0 if result["failed_count"] == 0 else 2
+
+    configure_original_repo(args.original_root)
+    patch_llm_timeout(args.llm_timeout_seconds)
 
     from config import ConfigManager
     from models.retriever import agentic_decomposer as decomposer

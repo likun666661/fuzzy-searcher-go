@@ -93,6 +93,11 @@ SCRIPT_EXPECTATIONS = {
         "scripts/check_paper_benchmark_result.py",
         "paper benchmark smoke passed",
     ],
+    "scripts/check_paper_benchmark_shard_runner.py": [
+        "paper benchmark shard runner check passed",
+        "paper_benchmark_shard_runner.py",
+        "check_paper_benchmark_result.py",
+    ],
     ".env.example": [
         "YOUTU_RAG_PROFILE=demo",
         "YOUTU_RAG_ARTIFACT_ROOT=../youtu-graphrag",
