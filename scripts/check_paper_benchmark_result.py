@@ -82,6 +82,8 @@ def main() -> int:
     require(isinstance(parameters.get("llm_max_attempts"), int), "llm_max_attempts must be recorded", errors)
     require(isinstance(parameters.get("retry_failed"), bool), "retry_failed must be recorded", errors)
     require(isinstance(parameters.get("llm_retry_count"), int), "llm_retry_count must be recorded", errors)
+    if parameters.get("shard_count") is not None:
+        require(isinstance(parameters.get("shard_count"), int), "shard_count must be numeric", errors)
     if args.prompt_mode:
         require(parameters.get("prompt_mode") == args.prompt_mode, f"prompt_mode != {args.prompt_mode}", errors)
 
@@ -90,6 +92,13 @@ def main() -> int:
     if args.prompt_mode:
         require(method_profile.get("prompt_mode") == args.prompt_mode, "method_profile prompt_mode mismatch", errors)
     require(method_profile.get("runtime_profile"), "missing method_profile runtime_profile", errors)
+    sharding = result.get("sharding")
+    if sharding is not None:
+        require(isinstance(sharding, dict), "sharding must be an object", errors)
+        if isinstance(sharding, dict):
+            require(sharding.get("schema_version") == "paper-benchmark-sharding/v1", "bad sharding schema", errors)
+            require(isinstance(sharding.get("shard_count"), int), "sharding shard_count must be numeric", errors)
+            require(isinstance(sharding.get("shard_checkpoints"), list), "sharding shard_checkpoints must be a list", errors)
 
     deviations = result.get("deviations") or {}
     expect_compacted = args.community_compaction == "completed"

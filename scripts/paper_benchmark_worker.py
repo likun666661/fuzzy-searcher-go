@@ -985,7 +985,7 @@ def main() -> int:
             "schema_version": "paper-benchmark-item/v1",
             "id": item_id,
             "index": qa["_index"],
-            "ordinal": ordinal,
+            "ordinal": args.offset + ordinal,
             "question": qa["_question"],
             "gold_answer": qa["_answer"],
             "predicted_answer": answer,

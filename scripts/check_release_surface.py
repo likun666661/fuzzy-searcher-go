@@ -87,7 +87,9 @@ SCRIPT_EXPECTATIONS = {
     "scripts/run_paper_benchmark_smoke.sh": [
         "Usage: scripts/run_paper_benchmark_smoke.sh",
         "PAPER_BENCHMARK_DATASET",
+        "PAPER_BENCHMARK_SHARDS",
         "scripts/paper_benchmark_worker.py",
+        "scripts/paper_benchmark_shard_runner.py",
         "scripts/check_paper_benchmark_result.py",
         "paper benchmark smoke passed",
     ],

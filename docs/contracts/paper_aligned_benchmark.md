@@ -144,6 +144,7 @@ Stable fields:
 - `max_failures`: stop after this many failed questions.
 - `answer_model`, `judge_model`, `llm_base_url`: non-secret model metadata.
 - `include_private_traces`: opt-in debug traces. Defaults to false.
+- `shard_count`: optional multi-worker process count. Defaults to `1`.
 
 The persisted job spec must contain resolved artifact paths and non-secret
 model metadata. It must not store API keys.
@@ -209,6 +210,23 @@ Phase 35 hardens the long-run method benchmark defaults:
 - `preflight_only=true` validates QA/graph/chunks/schema/community WAL paths
   and selected QA count without importing the original repo or making model
   calls.
+
+Phase 36 adds multi-worker sharding for long method runs. This is process-level
+parallelism, not threads inside a shared original-repo retriever:
+
+- `shard_count=1` keeps the legacy single-process runner.
+- `shard_count>1` starts independent Python worker processes over contiguous QA
+  ranges.
+- each shard writes separate result/progress/checkpoint files using
+  `.shard-XX-of-NN` suffixes;
+- the parent seeds shard checkpoints from the main checkpoint before launching,
+  so existing completed rows such as `226/688` are preserved and not re-run;
+- the parent merges shard checkpoint rows back into the main checkpoint and
+  final result by QA id and ordinal.
+
+The worker processes must not share `GraphQ`, `KTRetriever`, FAISS caches, or
+LLM client objects in memory. This keeps original repository state isolated and
+lets individual shards restart independently.
 
 ## Output Artifact
 
@@ -374,6 +392,17 @@ Resume rules:
 - final `paper-benchmark-result/v1.items` must include resumed and newly
   completed items in QA order;
 - completed checkpoint rows must not be re-answered or re-judged.
+
+Shard resume rules:
+
+- before a shard starts, the parent copies matching rows from the main
+  checkpoint into that shard checkpoint;
+- a resumed shard must skip successful checkpoint rows in its range;
+- `retry_failed=true` reruns only failed rows in that shard range;
+- the parent merge must de-duplicate by QA id and keep the latest terminal row
+  from each shard;
+- killing one shard must not corrupt other shard checkpoints or the main
+  checkpoint.
 
 ## Progress and Events
 

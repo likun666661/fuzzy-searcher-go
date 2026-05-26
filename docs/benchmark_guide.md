@@ -417,6 +417,23 @@ scripts/run_paper_benchmark_smoke.sh
 失败，保留同一 checkpoint 并用默认 `PAPER_BENCHMARK_RETRY_FAILED=true`
 续跑，只会重试失败项。
 
+长跑可以用多进程分片提速：
+
+```bash
+YOUTU_RAG_ARTIFACT_ROOT=/abs/path/youtu-graphrag \
+PAPER_BENCHMARK_LIMIT=688 \
+PAPER_BENCHMARK_COMMUNITY=completed \
+PAPER_BENCHMARK_PROMPT_MODE=open \
+PAPER_BENCHMARK_SHARDS=4 \
+scripts/run_paper_benchmark_smoke.sh
+```
+
+`PAPER_BENCHMARK_SHARDS>1` 会启动多个独立 Python worker，每个 worker
+处理一段 QA range，并写自己的 `.shard-XX-of-NN` checkpoint/progress/result。
+parent 会先把主 checkpoint 里已完成的题分发到对应 shard，再 merge 回主
+result/checkpoint。已有的 `226/688` checkpoint 不需要删除，续跑不会重烧已完成
+题。
+
 详细请求、输出、checkpoint 和验收标准见
 `docs/contracts/paper_aligned_benchmark.md`。
 
