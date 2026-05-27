@@ -579,3 +579,15 @@ python3 scripts/prepare_anonyrag.py \
 This downloads the Hugging Face parquet files and writes
 `data/anony_chs` / `data/anony_eng` JSON files in the original
 `youtu-graphrag` layout.
+
+To prepare the other public paper datasets in the same layout:
+
+```bash
+python3 scripts/prepare_paper_datasets.py \
+  --artifact-root /abs/path/youtu-graphrag
+```
+
+This downloads HotpotQA, 2WikiMultiHopQA, MuSiQue, and GraphRAG-Bench JSON
+files into `youtu-graphrag/data/paper_raw/`, then writes the config-compatible
+`hotpot`, `2wiki`, `musique`, and `graphrag-bench` paths documented in
+`docs/benchmark_guide.md`.

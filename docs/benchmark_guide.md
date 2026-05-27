@@ -163,6 +163,57 @@ experiments. They are intentionally conservative; for paper-grade evaluation,
 replace them with the official schema if the paper/repo releases a stricter
 one.
 
+### 2.2 Prepare the Other Paper Datasets Locally
+
+The paper also evaluates HotpotQA, 2WikiMultiHopQA, MuSiQue, and
+GraphRAG-Bench. This repo includes a helper that downloads the public
+GraphRAG-formatted JSON files and places them in the paths already referenced
+by the original `youtu-graphrag/config/base_config.yaml`:
+
+```bash
+cd /abs/path/youtu-rag-service
+
+python3 scripts/prepare_paper_datasets.py \
+  --artifact-root /abs/path/youtu-graphrag
+```
+
+It writes raw source copies under `youtu-graphrag/data/paper_raw/`, then
+prepares config-compatible files:
+
+```text
+youtu-graphrag/data/hotpotqa/
+  hotpotqa_corpus.json
+  hotpotqa.json
+
+youtu-graphrag/data/2wiki/
+  2wikimultihopqa_corpus.json
+  2wikimultihopqa.json
+
+youtu-graphrag/data/musique/
+  musique_corpus.json
+  musique.json
+
+youtu-graphrag/data/graphrag-bench-reformat/
+  bench_corpus.json
+  graphrag-bench.json
+```
+
+On the current local machine, the prepared paper dataset inventory is:
+
+| dataset | corpus rows/chunks | QA rows |
+| --- | ---: | ---: |
+| `hotpot` | 66581 | 7405 |
+| `2wiki` | 54957 | 12576 |
+| `musique` | 17629 | 2417 |
+| `graphrag-bench` | 21 | 4072 |
+| `anony_chs` | 2763 | 688 |
+| `anony_eng` | 3447 | 709 |
+
+The helper uses `suki4060/GraphRAG-Benchmark` for HotpotQA, 2WikiMultiHopQA,
+and MuSiQue, and `GraphRAG-Bench/GraphRAG-Bench` for GraphRAG-Bench
+medical/novel. For GraphRAG-Bench it combines the medical and novel subsets
+into the single `graphrag-bench` dataset layout expected by the original repo.
+
 ## 3. 数据要准备成什么样
 
 最小需要三类文件。
