@@ -553,6 +553,12 @@ For one-off dataset benchmark experiments, start with
   `docs/contracts/paper_aligned_benchmark.md`: prebuilt graph/chunks, original
   Python `GraphQ` + `KTRetriever` + `Eval`, `mode=agent` for the main run, and
   checkpoint/progress around the long loop.
+- The current full AnonyRAG-CHS reference run is documented in
+  `docs/benchmark_guide.md`: DeepSeek V4 Flash, completed community
+  compaction, 688/688 questions, `371/688 = 53.92%` accuracy, and
+  anonymized mapping F1 `0.7678`. Treat this as an industrialized
+  paper-method-aligned run, not a strict reproduction of the paper's
+  DeepSeek-V3-0324/Qwen3-32B numbers.
 
 When using DeepSeek for answer/judge experiments, map the existing key into the
 Youtu-RAG environment names instead of writing secrets to disk:

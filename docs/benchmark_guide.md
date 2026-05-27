@@ -434,6 +434,69 @@ parent 会先把主 checkpoint 里已完成的题分发到对应 shard，再 mer
 result/checkpoint。已有的 `226/688` checkpoint 不需要删除，续跑不会重烧已完成
 题。
 
+### Current full AnonyRAG-CHS reference result
+
+The current full-run reference artifact is:
+
+```text
+youtu-graphrag/output/benchmarks/anony_chs_deepseek-v4-flash_method_agent_open_completed_limit688.json
+```
+
+It is a paper-method-aligned industrial run:
+
+| Field | Value |
+| --- | --- |
+| dataset | `anony_chs` |
+| questions | `688/688` completed |
+| mode | `agent` |
+| prompt mode | `open` |
+| retrieval config | `recall_paths=2`, `top_k_filter=20`, high recall on, rerank on |
+| graph source | industrial WAL full graph |
+| community compaction | `completed` |
+| answer model | `deepseek-v4-flash` |
+| judge model | `deepseek-v4-flash` |
+| shards | `4` |
+| failures | `0` |
+| accuracy | `371/688 = 0.5392441860` |
+
+AnonyRAG-specific mapping diagnostics:
+
+| Metric | Value |
+| --- | --- |
+| applicable questions | `575` |
+| expected mappings | `2710` |
+| predicted mappings | `2700` |
+| matched mappings | `2077` |
+| exact matched mappings | `863` |
+| precision | `0.7692592593` |
+| recall | `0.7664206642` |
+| F1 | `0.7678373383` |
+| exact recall | `0.3184501845` |
+
+The closest paper comparison is Table 1 top-20 Accuracy, Open mode,
+AnonyRAG-CHS. The paper reports Youtu-GraphRAG with DeepSeek-V3-0324 at
+`42.88%` and Qwen3-32B at `39.24%`. This run reports `53.92%`, which is
+`+11.04` absolute points over the paper's DeepSeek-V3-0324 number. Do not
+attribute that delta entirely to service engineering: the base model changed to
+DeepSeek V4 Flash, and stronger base-model semantic/reasoning ability is likely
+the largest contributor.
+
+The mapping metrics above are not reported by the paper and should not be
+mixed with the paper's top-k Accuracy table. They are our deterministic
+diagnostic for anonymous-entity restoration quality. Accuracy remains the main
+paper-comparable metric; mapping precision/recall/F1/exact recall explain
+whether wrong binary-judge items were close on entity slots or completely off.
+
+Report this result as:
+
+```text
+paper GraphQ/KTRetriever/Eval path + DeepSeek V4 Flash +
+industrial WAL/sharded graph + replay-only community compaction
+```
+
+It is not a byte-for-byte reproduction of the paper's original graph
+construction or model profile.
+
 详细请求、输出、checkpoint 和验收标准见
 `docs/contracts/paper_aligned_benchmark.md`。
 

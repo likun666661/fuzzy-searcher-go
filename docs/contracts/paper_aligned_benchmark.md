@@ -359,6 +359,79 @@ For AnonyRAG, result artifacts should retain the deterministic anonymized
 mapping metrics from `benchmark-result/v1` so paper accuracy and entity
 restoration quality can be interpreted together.
 
+## Current Reference Result
+
+The current full AnonyRAG-CHS reference result is:
+
+```text
+output/benchmarks/anony_chs_deepseek-v4-flash_method_agent_open_completed_limit688.json
+```
+
+It passed `scripts/check_paper_benchmark_result.py` with:
+
+```text
+paper benchmark result ok: anony_chs agent n=688 accuracy=0.5392441860465116
+```
+
+Summary:
+
+| Field | Value |
+| --- | --- |
+| `schema_version` | `paper-benchmark-result/v1` |
+| `dataset` | `anony_chs` |
+| `mode` | `agent` |
+| `question_count` | `688` |
+| `answered_count` | `688` |
+| `failed_count` | `0` |
+| `correct_count` | `371` |
+| `accuracy` | `0.5392441860465116` |
+| `answer_model` | `deepseek-v4-flash` |
+| `judge_model` | `deepseek-v4-flash` |
+| `prompt_mode` | `open` |
+| `community_compaction` | `completed` |
+| `runtime_profile` | `industrial_wal_checkpointed_sharded` |
+
+The result's `paper_config` matches the main paper-aligned service profile:
+`constructor_trigger=false`, `retrieve_trigger=true`, `mode=agent`,
+`recall_paths=2`, `top_k_filter=20`, query enhancement on, high recall on,
+reranking on, and `agent_max_steps=5`.
+
+AnonyRAG mapping diagnostics:
+
+| Metric | Value |
+| --- | --- |
+| `applicable_count` | `575` |
+| `expected_count` | `2710` |
+| `predicted_count` | `2700` |
+| `matched_count` | `2077` |
+| `exact_matched_count` | `863` |
+| `precision` | `0.7692592592592593` |
+| `recall` | `0.7664206642066421` |
+| `f1` | `0.7678373382624769` |
+| `exact_recall` | `0.31845018450184504` |
+
+Paper comparison:
+
+| Source | Model / profile | AnonyRAG-CHS metric |
+| --- | --- | --- |
+| Paper Table 1 top-20 Accuracy | Youtu-GraphRAG + DeepSeek-V3-0324 | `42.88%` |
+| Paper Table 1 top-20 Accuracy | Youtu-GraphRAG + Qwen3-32B | `39.24%` |
+| This service reference run | Youtu-GraphRAG path + DeepSeek V4 Flash | `53.92%` |
+
+This is a paper-method-aligned industrial run, not a strict reproduction. The
+retrieval/answer/judge path uses the original `GraphQ + KTRetriever + Eval`
+chain, but the graph is produced by the service's WAL/sharded construction and
+replay-only community compaction, and the base model is newer. The observed
+gain over the paper should therefore be attributed primarily to the changed
+base model plus completed community graph, with service engineering providing
+resumeability, auditability, and failure isolation.
+
+The mapping metrics are service-added diagnostics. The paper discusses
+character matching metrics such as recall/EM/F1 as possible response-matching
+protocols, but its reported tables use LLM-judged top-k Accuracy. Do not compare
+mapping F1 directly against paper Accuracy; use it to explain entity-slot
+quality within AnonyRAG answers.
+
 ## Checkpoint and Resume
 
 The checkpoint file is append-only JSONL. Each terminal question row uses
