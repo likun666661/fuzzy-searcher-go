@@ -72,6 +72,14 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def load_json(path: str) -> Any:
     with open(path, "r", encoding="utf-8") as f:
         return json_repair.load(f)
@@ -163,6 +171,65 @@ def load_wal(path: str) -> tuple[dict[str, dict[str, Any]], int]:
                 raise SystemExit(f"graph_build_wal_invalid: line {line_no}: missing chunk_key")
             latest[key] = record
     return latest, max_sequence
+
+
+def build_input_manifest(args: argparse.Namespace, builder: Any, items: list[dict[str, Any]]) -> dict[str, Any]:
+    chunks_payload = [
+        {
+            "chunk_key": item["chunk_key"],
+            "chunk_sha256": item["chunk_sha256"],
+            "doc_index": item["doc_index"],
+            "chunk_index": item["chunk_index"],
+        }
+        for item in items
+    ]
+    chunking = {
+        "chunk_size": getattr(builder.config.construction, "chunk_size", None),
+        "overlap": getattr(builder.config.construction, "overlap", None),
+        "min_tail_tokens": getattr(builder.config.construction, "min_tail_tokens", None),
+        "datasets_no_chunk": sorted(getattr(builder.config.construction, "datasets_no_chunk", []) or []),
+    }
+    manifest = {
+        "schema_version": "graph-build-input-manifest/v1",
+        "dataset": args.dataset,
+        "mode": args.mode,
+        "corpus_sha256": sha256_file(args.corpus),
+        "schema_sha256": sha256_file(args.schema) if args.schema else "",
+        "chunking": chunking,
+        "total_chunks": len(items),
+        "chunks_sha256": sha256_text(json.dumps(chunks_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))),
+    }
+    manifest["manifest_sha256"] = sha256_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    return manifest
+
+
+def validate_wal_manifest(path: str, expected: dict[str, Any]) -> None:
+    if not path or not os.path.exists(path):
+        return
+    expected_hash = expected.get("manifest_sha256")
+    with open(path, "r", encoding="utf-8") as f:
+        for line_no, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if record.get("schema_version") != WAL_SCHEMA_VERSION:
+                continue
+            payload = record.get("payload")
+            manifest = payload.get("manifest") if isinstance(payload, dict) else None
+            if not isinstance(manifest, dict):
+                manifest = record.get("manifest") if isinstance(record.get("manifest"), dict) else None
+            if not manifest:
+                continue
+            if manifest.get("manifest_sha256") != expected_hash:
+                raise SystemExit(
+                    "graph_build_wal_stale: "
+                    f"line {line_no}: expected manifest {expected_hash}, "
+                    f"found {manifest.get('manifest_sha256')}"
+                )
 
 
 def configure_import_path() -> None:
@@ -412,6 +479,10 @@ def main() -> int:
             items.append(chunk_record(args.dataset, doc_index, chunk_index, chunk))
     for ordinal, item in enumerate(items):
         item["chunk_ordinal"] = ordinal
+    input_manifest = build_input_manifest(args, builder, items)
+
+    if args.resume:
+        validate_wal_manifest(wal_path, input_manifest)
 
     will_spawn_child_runners = (
         args.runner_count > 1
@@ -464,6 +535,7 @@ def main() -> int:
             "llm_max_attempts": max(args.llm_max_attempts, 1),
             "llm_retry_base_seconds": max(args.llm_retry_base_seconds, 0.0),
             "llm_retry_max_seconds": max(args.llm_retry_max_seconds, 0.0),
+            "manifest": input_manifest,
         },
     }, wal_lock, wal_sequence)
 
@@ -651,6 +723,7 @@ def main() -> int:
                 "payload": {
                     "token_count": result.get("token_count", 0),
                     "attempts": result.get("attempts", 1),
+                    "manifest": input_manifest,
                 },
                 **result,
             }, wal_lock, wal_sequence)
@@ -702,6 +775,7 @@ def main() -> int:
             "runner_count": max(args.runner_count, 1),
             "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
             "llm_max_attempts": max(args.llm_max_attempts, 1),
+            "manifest": input_manifest,
         },
     }, wal_lock, wal_sequence)
     builder.triple_deduplicate()
@@ -798,6 +872,7 @@ def main() -> int:
             "runner_count": max(args.runner_count, 1),
             "llm_rate_limit_rpm": args.llm_rate_limit_rpm,
             "llm_max_attempts": max(args.llm_max_attempts, 1),
+            "manifest": input_manifest,
         },
         "finished_at": now_iso(),
     }

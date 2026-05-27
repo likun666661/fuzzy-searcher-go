@@ -224,6 +224,24 @@ Rules:
 - `chunk_id` may remain the existing Youtu-RAG chunk id, but replay decisions
   must use `chunk_key` plus hashes.
 
+Current worker behavior:
+
+- each manifest-aware run writes `graph-build-input-manifest/v1` in run-event
+  payloads and in `chunk_succeeded.payload.manifest`;
+- the manifest covers dataset, construction mode, corpus sha256, schema
+  sha256, chunking settings, total chunk count, and ordered chunk hashes;
+- `--resume` scans existing manifest-bearing WAL rows before replay and fails
+  fast with `graph_build_wal_stale` when the manifest changed;
+- legacy WALs without manifests remain readable for already-built artifacts,
+  but new production WALs should always carry the manifest.
+
+The current implementation still uses `doc_index:chunk_index:text_hash` inside
+`chunk_key`. This is safe for correctness when paired with the manifest check,
+but it is not optimal for future upsert: inserting a document near the front of
+the corpus can shift ordinals and reduce reuse. A future upsert-capable key
+should use a stable document id plus per-document chunk ordinal, or a
+content-addressed chunk id with duplicate-occurrence disambiguation.
+
 ## `chunk_succeeded` Payload
 
 The success payload is the Python-authoritative raw extraction unit from which
@@ -341,8 +359,8 @@ Stable error strings:
 
 - `graph_wal_invalid`: WAL JSONL cannot be parsed or required fields are
   missing.
-- `graph_wal_stale`: WAL hashes do not match the current corpus/schema/chunking
-  inputs.
+- `graph_build_wal_stale`: WAL hashes do not match the current
+  corpus/schema/chunking/mode inputs.
 - `graph_wal_write_failed`: the worker cannot append or flush a WAL row.
 - `graph_checkpoint_stale`: checkpoint metadata does not match the WAL or input
   hashes.
@@ -400,7 +418,7 @@ Phase 28 gates should verify:
 - interrupted `chunk_started` rows are retried.
 - failed chunk rows are visible and follow retry/failure-budget semantics.
 - malformed WAL fails fast with `graph_wal_invalid`.
-- stale WAL fails fast with `graph_wal_stale`.
+- stale WAL fails fast with `graph_build_wal_stale`.
 - compaction writes graph/chunks only after successful chunk processing.
 - cancellation leaves a resumable WAL and does not mark graph/chunks written.
 - existing `build_graph`, `create_dataset`, `rebuild`, benchmark, release, and

@@ -520,7 +520,9 @@ contracts are documented in `docs/contracts/generate_golden_worker.md`,
 extraction, and replay-only community compaction are documented in
 `docs/contracts/graph_construction_wal.md`,
 `docs/contracts/graph_extraction_multi_runner.md`, and
-`docs/contracts/graph_community_compaction.md`. The Phase 9 Go-native path1 raw
+`docs/contracts/graph_community_compaction.md`. The graph mutation / future
+upsert gap analysis is in `docs/graph_update_gap_analysis.md`. The Phase 9
+Go-native path1 raw
 candidate parity contract is documented in
 `docs/contracts/path1_candidate_generation.md`.
 The Phase 14 workflow contract is documented in `docs/contracts/workflows.md`.

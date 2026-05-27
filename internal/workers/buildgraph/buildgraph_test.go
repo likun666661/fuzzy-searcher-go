@@ -476,19 +476,18 @@ func TestRunCompactOnlyWorkerFailsBeforeCommunityOnIncompleteExtractionWAL(t *te
 		ConfigPath:        "config/base_config.yaml",
 		Mode:              "noagent",
 	})
-	if err == nil || !strings.Contains(err.Error(), "graph_compaction_missing_extraction") {
+	if err == nil || !strings.Contains(err.Error(), "graph_build_wal_stale") {
 		t.Fatalf("compact-only incomplete extraction err = %v", err)
 	}
 	records := readWALRecords(t, walPath)
 	if got := countWALEvent(records, "chunk_succeeded"); got != 1 {
 		t.Fatalf("incomplete compact-only duplicated chunk_succeeded count = %d, records = %#v", got, records)
 	}
-	if countWALEvent(records, "run_failed") == 0 {
-		t.Fatalf("incomplete compact-only should append run_failed, records = %#v", records)
+	if countWALEvent(records, "run_failed") != 0 {
+		t.Fatalf("stale compact-only should fail before appending run_failed, records = %#v", records)
 	}
-	compactionRecords := readWALRecords(t, compactionWALPath)
-	if countWALEvent(compactionRecords, "compaction_failed") != 1 {
-		t.Fatalf("incomplete compaction WAL records = %#v", compactionRecords)
+	if _, err := os.Stat(compactionWALPath); !os.IsNotExist(err) {
+		t.Fatalf("stale compact-only should not write compaction WAL, stat err=%v", err)
 	}
 	if _, err := os.Stat(compactionLogPath); !os.IsNotExist(err) {
 		t.Fatalf("process_level4 should not run for incomplete extraction WAL, stat err=%v", err)
@@ -548,6 +547,61 @@ func TestRunWorkerRetriesTransientExtractionFailure(t *testing.T) {
 	}
 	if !hasChunkSuccessAttempt(records, 0, 2) {
 		t.Fatalf("retry chunk success attempts not recorded, records=%#v", records)
+	}
+}
+
+func TestRunWorkerRejectsStaleWALAfterSchemaChange(t *testing.T) {
+	dir := t.TempDir()
+	script := realBuildGraphWorkerPath(t)
+	prepareFakeYoutuGraphRAG(t, dir)
+	corpusPath := filepath.Join(dir, "corpus.json")
+	schemaPath := filepath.Join(dir, "schema.json")
+	graphPath := filepath.Join(dir, "out", "demo_new.json")
+	chunksPath := filepath.Join(dir, "out", "demo.txt")
+	walPath := filepath.Join(dir, "out", "demo.wal.jsonl")
+	mustWrite(t, corpusPath, `[{"title":"one","text":"Alpha"}]`)
+	mustWrite(t, schemaPath, `{"Nodes":["entity"],"Relations":["related"],"Attributes":["name"]}`)
+
+	spec := jobs.BuildGraphSpec{
+		Dataset:          "demo",
+		CorpusPath:       corpusPath,
+		SchemaPath:       schemaPath,
+		GraphOutputPath:  graphPath,
+		ChunksOutputPath: chunksPath,
+		WALPath:          walPath,
+		Resume:           true,
+		MaxWorkers:       1,
+		SkipCommunities:  true,
+		ConfigPath:       "config/base_config.yaml",
+		Mode:             "noagent",
+	}
+	if _, err := buildgraph.Run(context.Background(), buildgraph.Config{
+		PythonBin:  pythonPathWrapper(t, dir),
+		ScriptPath: script,
+		WorkingDir: dir,
+	}, spec); err != nil {
+		t.Fatalf("seed wal: %v", err)
+	}
+	records := readWALRecords(t, walPath)
+	if got := countWALEvent(records, "chunk_succeeded"); got != 1 {
+		t.Fatalf("seed chunk_succeeded count = %d, records = %#v", got, records)
+	}
+	if !hasRunRecordWithManifest(records) {
+		t.Fatalf("seed WAL missing input manifest, records = %#v", records)
+	}
+
+	mustWrite(t, schemaPath, `{"Nodes":["entity","event"],"Relations":["related"],"Attributes":["name"]}`)
+	_, err := buildgraph.Run(context.Background(), buildgraph.Config{
+		PythonBin:  pythonPathWrapper(t, dir),
+		ScriptPath: script,
+		WorkingDir: dir,
+	}, spec)
+	if err == nil || !strings.Contains(err.Error(), "graph_build_wal_stale") {
+		t.Fatalf("stale WAL err = %v", err)
+	}
+	resumedRecords := readWALRecords(t, walPath)
+	if got := countWALEvent(resumedRecords, "chunk_succeeded"); got != 1 {
+		t.Fatalf("stale resume should not append success, got %d records=%#v", got, resumedRecords)
 	}
 }
 
@@ -786,6 +840,21 @@ func hasRunRecordWithRateLimit(records []map[string]any, rpm float64) bool {
 		}
 		payload, _ := record["payload"].(map[string]any)
 		if payload["llm_rate_limit_rpm"] == rpm {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRunRecordWithManifest(records []map[string]any) bool {
+	for _, record := range records {
+		event, _ := record["event"].(string)
+		if !strings.HasPrefix(event, "run_") {
+			continue
+		}
+		payload, _ := record["payload"].(map[string]any)
+		manifest, _ := payload["manifest"].(map[string]any)
+		if manifest["schema_version"] == "graph-build-input-manifest/v1" && manifest["manifest_sha256"] != "" {
 			return true
 		}
 	}
